@@ -783,7 +783,39 @@ export function holdTidying(
       ...(mentions.length ? { mentions } : {}),
     })
   );
+  // The composer that held it lets it go once the better words are in (15 s
+  // at most). If that composer is gone (you left the chat, the screen
+  // reloaded) nothing would: so the app lets it go itself, a little later.
+  setTimeout(() => letGoHeld(agentId, clientId), HELD_MAX_MS);
   return clientId;
+}
+
+/** Longest a held send waits, whatever happened to the composer holding it. */
+export const HELD_MAX_MS = 20_000;
+
+/** Whether this send is still held, waiting on the better words. */
+export function isHeld(agentId: string, clientId: string): boolean {
+  return !!getApp().pending[agentId]?.some((p) => p.clientId === clientId && p.tidying);
+}
+
+/**
+ * A held send that nothing let go: it goes now, with the words it has. Does
+ * nothing once it was let go (or sent, or removed).
+ */
+export function letGoHeld(agentId: string, clientId: string) {
+  const p = getApp().pending[agentId]?.find((x) => x.clientId === clientId);
+  if (!p?.tidying) return;
+  const text = p.text.trim();
+  if (!text && !p.attachments?.length) {
+    discardPending(agentId, clientId);
+    return;
+  }
+  setHeldText(agentId, clientId, text, false);
+  send(agentId, text, Boolean(p.interrupt), clientId, p.attachments ?? [], p.mentions ?? []).catch(
+    () => {
+      // `send` marks it failed, with Try again; nothing more to do here.
+    }
+  );
 }
 
 /** A held send's words, as they change; `tidying` false once it's let go to send. */

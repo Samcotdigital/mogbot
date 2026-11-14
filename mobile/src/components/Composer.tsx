@@ -157,6 +157,7 @@ import {
   describeError,
   discardPending,
   holdTidying,
+  isHeld,
   send,
   sendEdited,
   setHeldText,
@@ -279,6 +280,13 @@ export function Composer({
     (text: string) => {
       if (text.trim()) heard.current.lastWordsAt = Date.now();
       const h = heldSend.current;
+      // Let go by the app meanwhile (it waited too long): it's sent as it
+      // was, so words this late are dropped, never put in an emptied field.
+      if (h && !isHeld(agent.id, h.clientId)) {
+        heldSend.current = null;
+        setHolding(false);
+        return;
+      }
       if (h) {
         h.draft = { ...h.draft, text };
         setHeldText(agent.id, h.clientId, text);
@@ -563,7 +571,8 @@ export function Composer({
     const h = heldSend.current;
     heldSend.current = null;
     setHolding(false);
-    if (!h) return;
+    // Already let go by the app (it waited too long): it's on its way.
+    if (!h || !isHeld(agent.id, h.clientId)) return;
     // The better words are in it now; nothing more comes.
     dictation.drop();
     const taken = takeDraft(h.draft);

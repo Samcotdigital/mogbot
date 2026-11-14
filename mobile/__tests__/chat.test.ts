@@ -139,6 +139,12 @@ describe('outbox', () => {
       ['failed', false, true],
     ]);
   });
+
+  it('sends a message held while tidying when the app went, never left saying Tidying…', () => {
+    const restored = restorePending({ a: [pend('held', 1, { tidying: true })] });
+    expect(restored.a[0].tidying).toBeUndefined();
+    expect(restored.a[0].waiting).toBe(true);
+  });
 });
 
 describe('offline cache', () => {

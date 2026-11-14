@@ -22,7 +22,7 @@ vi.mock('../../lib/dictation', async (importOriginal) => ({
   },
 }));
 
-import { useDictation } from './useDictation';
+import { HELD_MAX_MS, useDictation } from './useDictation';
 
 function setup(initial = 'Hi', holdOnSend = false) {
   let draft = initial;
@@ -235,6 +235,51 @@ describe('useDictation', () => {
     expect(send.mock.results[0].value).toBe('Hi Tell Mogbot.');
     expect(draft()).toBe('next one');
     expect(hook.result.current.held).toBeNull();
+  });
+
+  it('held, and the written-out words never come: it goes with the live words after HELD_MAX_MS', async () => {
+    vi.useFakeTimers();
+    try {
+      const { hook, draft } = setup('Hi', true);
+      await act(async () => {
+        hook.result.current.toggle();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      act(() => emit({ kind: 'final', session: 7, text: 'ship it' }));
+      const send = vi.fn(() => draft());
+      act(() => hook.result.current.stopAndSend(send));
+      expect(hook.result.current.held).toBe('Hi');
+      act(() => emit({ kind: 'improving', session: 7 }));
+      act(() => {
+        vi.advanceTimersByTime(HELD_MAX_MS);
+      });
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.results[0].value).toBe('Hi ship it');
+      expect(hook.result.current.held).toBeNull();
+      expect(hook.result.current.phase).toBe('idle');
+      expect(cancel).toHaveBeenCalledWith(7);
+      // Anything it says later lands nowhere.
+      act(() => emit({ kind: 'improved', session: 7, text: 'Late.', raw: 'Late.', tidied: true }));
+      act(() => emit({ kind: 'ended', session: 7, cancelled: true }));
+      expect(draft()).toBe('');
+      expect(send).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('held when the chat closes (another agent opened): it is sent, never lost', async () => {
+    const { hook, draft } = setup('Hi', true);
+    await act(async () => {
+      hook.result.current.toggle();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    act(() => emit({ kind: 'final', session: 7, text: 'ship it' }));
+    const send = vi.fn(() => draft());
+    act(() => hook.result.current.stopAndSend(send));
+    hook.unmount();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.results[0].value).toBe('Hi ship it');
   });
 
   it('held, then not written out: the message comes back to the field and nothing is sent', async () => {

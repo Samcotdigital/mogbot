@@ -109,7 +109,11 @@ export function restorePending(pending: SyncState['pending']): SyncState['pendin
   return Object.fromEntries(
     Object.entries(pending).map(([id, list]) => [
       id,
-      list.map((p) => (p.failed || p.waiting ? p : { ...p, waiting: true })),
+      list.map((held) => {
+        // Held while tidying when the app went: nothing will tidy it now, so it goes as it is.
+        const { tidying: _held, ...p } = held;
+        return p.failed || p.waiting ? p : { ...p, waiting: true };
+      }),
     ])
   );
 }

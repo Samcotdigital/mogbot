@@ -97,6 +97,9 @@ interface Options {
   holdOnSend?: boolean;
 }
 
+/** Longest a message sent mid-dictation waits for the written-out words. */
+export const HELD_MAX_MS = 20_000;
+
 export function useDictation({
   getDraft: getField,
   setDraft: setField,
@@ -241,6 +244,53 @@ export function useDictation({
       if (sessionRef.current !== null) void cancelDictation(sessionRef.current);
     };
   }, [getDraft, setDraft, setField, setLevel, setPhase, showToast]);
+
+  /**
+   * A held message that can't wait any longer (the better words took too
+   * long, or the chat is closing): it goes now with the words it has (the
+   * written-out ones if they came, else the live ones), and this dictation
+   * is let go, so nothing it says later lands anywhere.
+   */
+  const letGoHeld = useCallback(() => {
+    const send = sendAfterRef.current;
+    if (heldRef.current === null || !send) return;
+    const live = liveRef.current.trim();
+    const held = heldRef.current;
+    // Nothing of what you said is here yet: it waits in the field for you, never half sent.
+    const said = gotWordsRef.current || live !== '';
+    const words = gotWordsRef.current ? held : joinDictation(originalRef.current, live);
+    sendAfterRef.current = null;
+    heldRef.current = null;
+    const session = sessionRef.current;
+    sessionRef.current = null;
+    if (session !== null) void cancelDictation(session);
+    holdingRef.current = false;
+    setLevel(0);
+    setPhase('idle');
+    const typed = getField();
+    if (!said) {
+      setField(typed.trim() ? joinDictation(held, typed) : held);
+    } else if (words.trim()) {
+      setField(words);
+      send();
+      setField(typed);
+    }
+    setHeld(null);
+  }, [getField, setField, setLevel, setPhase]);
+  const letGoHeldRef = useRef(letGoHeld);
+  useEffect(() => {
+    letGoHeldRef.current = letGoHeld;
+  }, [letGoHeld]);
+
+  // Held, it never waits longer than HELD_MAX_MS for the better words.
+  useEffect(() => {
+    if (held === null) return;
+    const t = setTimeout(() => letGoHeldRef.current(), HELD_MAX_MS);
+    return () => clearTimeout(t);
+  }, [held === null]); // eslint-disable-line react-hooks/exhaustive-deps -- once per hold
+
+  // The chat closing (another agent opened) with a message held: it goes now, never lost.
+  useEffect(() => () => letGoHeldRef.current(), []);
 
   // Enter or Send while listening: it goes once the words are in. After the
   // phase is idle (an effect), so the chat's send sees dictation over.
