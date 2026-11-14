@@ -735,7 +735,7 @@ export function PendingRow({ pending }: { pending: PendingSend }) {
   const colors = useColors();
   const styles = useStyles();
   const macName = useApp((s) => s.credentials?.name) ?? comp.your;
-  const dim = pending.failed || pending.waiting;
+  const dim = pending.failed || pending.waiting || pending.tidying;
   const slow = useSlow(pending.ts);
   return (
     <View style={styles.userRow}>
@@ -759,7 +759,12 @@ export function PendingRow({ pending }: { pending: PendingSend }) {
           {pending.reason}
         </T>
       )}
-      {pending.failed || pending.waiting ? (
+      {pending.tidying ? (
+        // Sent while the computer tidies the dictated words: it goes once they're in.
+        <T variant="caption" color={colors.textSecondary} style={styles.meta}>
+          Tidying…
+        </T>
+      ) : pending.failed || pending.waiting ? (
         <View style={styles.failedLine}>
           <T
             variant="caption"

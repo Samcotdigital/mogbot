@@ -98,8 +98,10 @@ on your computer, primed with your agents' and projects' names. Then a quick pas
 with no tools) fixes only misheard names and punctuation, using the conversation you're in. The box
 says **Tidying…** for a few seconds, then shows the better words; **Undo** puts back what it first
 heard. On the phone your words come out one after another as you speak, stay in the box while that happens, with a soft light passing over
-them, then only the words that changed swap, lit for a moment. If Claude Code isn't set up, you get
-Whisper's words alone.
+them, then only the words that changed swap, lit for a moment. Send while it's still listening or
+tidying, on the Mac or the phone, and the message moves up into the chat at once, dimmed with
+**Tidying…** under it; it goes by itself once the better words are in, and the box is free for your
+next message. If Claude Code isn't set up, you get Whisper's words alone.
 
 **Your words.** Settings → Agents → Dictation keeps the names and terms dictation should always get
 right. Add one there, or just fix it: when you change the same dictated word twice before sending

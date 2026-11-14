@@ -1212,6 +1212,19 @@ const startThenTidying = () => {
   return { status: 'listening', session: 1 };
 };
 
+/** Enter while listening: the last words land and the computer writes them out again. */
+const stopThenTidying = () => {
+  setTimeout(() => {
+    void emit('dictation://event', {
+      kind: 'final',
+      session: 1,
+      text: 'Can you ask Finance to send the Northwind reminder',
+    });
+    void emit('dictation://event', { kind: 'improving', session: 1 });
+  }, 50);
+  return null;
+};
+
 /** Written out again: the better words replaced the live ones, Undo offered. */
 const startThenTidied = () => {
   setTimeout(() => {
@@ -3733,6 +3746,27 @@ export const agentsScenarios: Scenario[] = [
       start_dictation: startThenTidying,
       cancel_dictation: null,
       stop_dictation: null,
+    },
+  },
+  {
+    id: 'agents-dictation-held',
+    title: 'Agents — sent while dictation is still tidying',
+    looksRightWhen:
+      'Enter while dictating: the message is already in the chat as your bubble, dimmed, with “Tidying…” under it. The composer under it is empty and ordinary (no Tidying row), ready for the next message.',
+    openSelector: AGENTS_TAB,
+    requires: '.agent-chat__row--user[data-sending]',
+    steps: [
+      { click: '.agent-composer__mic' },
+      { focus: '.agent-composer__input' },
+      { key: 'Enter' },
+    ],
+    mockEvents: true,
+    commands: {
+      agents_overview: overview(),
+      agents_messages: messagesFor,
+      start_dictation: startListening,
+      stop_dictation: stopThenTidying,
+      cancel_dictation: null,
     },
   },
   {

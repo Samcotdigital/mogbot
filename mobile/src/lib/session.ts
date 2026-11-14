@@ -64,13 +64,7 @@ import {
 import { flushCache, forgetCache, saveOutbox, loadCache, watchCache } from './cache';
 import { forgetRemembered } from './remembered';
 import { flushDrafts, forgetDrafts, loadDrafts, refusedToDraft, setComposer } from './drafts';
-import {
-  interruptStillMeant,
-  outboxPlan,
-  retryWaitMs,
-  sendInOrder,
-  unreached,
-} from './outbox';
+import { interruptStillMeant, outboxPlan, retryWaitMs, sendInOrder, unreached } from './outbox';
 import { loadPrefs } from './prefs';
 import { getApp, setApp, update, useApp } from './store';
 import {
@@ -83,6 +77,7 @@ import {
   emptySync,
   mergePage,
   setPendingFailed,
+  setPendingText,
 } from './sync';
 import { clearCache, http, localFiles, type PickedFile } from './files';
 import { relayImage, retryRelayImage, retryRelayImages } from './relayImages';
@@ -762,6 +757,38 @@ async function flushOutbox() {
   } finally {
     flushing = false;
   }
+}
+
+/**
+ * Send pressed while the computer tidies what was said: the message shows in
+ * the chat at once, dimmed with "Tidying…", and goes (`send` with this
+ * `clientId`) once the better words are in. Returns its client id.
+ */
+export function holdTidying(
+  agentId: string,
+  text: string,
+  attachments: PendingAttachment[] = [],
+  mentions: string[] = []
+): string {
+  const clientId = Crypto.randomUUID();
+  update((s) =>
+    addPending(s, {
+      clientId,
+      agentId,
+      text,
+      ts: Date.now(),
+      failed: false,
+      tidying: true,
+      ...(attachments.length ? { attachments } : {}),
+      ...(mentions.length ? { mentions } : {}),
+    })
+  );
+  return clientId;
+}
+
+/** A held send's words, as they change; `tidying` false once it's let go to send. */
+export function setHeldText(agentId: string, clientId: string, text: string, tidying = true) {
+  update((s) => setPendingText(s, agentId, clientId, text, tidying));
 }
 
 export function discardPending(agentId: string, clientId: string) {

@@ -313,6 +313,8 @@ function TemplateStarters({
 }
 
 /** Within this many px of the bottom counts as "at the bottom". */
+/** The row of a message sent while dictation still tidies it (useDictation `holdOnSend`). */
+const HELD_ID = 'dictation-held';
 const STICK_THRESHOLD = 80;
 
 /** Older lines start loading while this many screens of history are still above. */
@@ -628,7 +630,14 @@ export const AgentChat = memo(function AgentChat({
     getContext,
     meterRef: micRef,
     enabled: engineReady,
+    holdOnSend: true,
   });
+  const held = dictation.held;
+  // A held message is already in the chat: the field is an ordinary empty one again.
+  const composerDictation = useMemo(
+    () => (held === null ? dictation : { ...dictation, phase: 'idle' as const }),
+    [dictation, held]
+  );
   const dictating = dictation.phase !== 'idle';
   const blocked = dictation.blocked ? blockedCopy(dictation.blocked) : null;
   const sectionRef = useRef<HTMLElement>(null);
@@ -864,8 +873,11 @@ export const AgentChat = memo(function AgentChat({
     // The reply being written sits after what's settled and before anything
     // you've just sent, which it will read next.
     const draft = streaming && !list.some((m) => m.id === streaming.id) ? [streaming] : [];
+    // Sent while dictation still tidies it: here at once, dimmed, until it goes.
+    if (held?.trim())
+      local.push({ id: HELD_ID, agentId: agent.id, ts: Date.now(), kind: 'user', text: held });
     return { shown: [...list, ...draft, ...local], aliases, failed, sending };
-  }, [messages, pending, agent.id, streaming]);
+  }, [messages, pending, agent.id, streaming, held]);
 
   // What the rows read from the agent. A status or activity change re-renders
   // the header and the indicator, never the history.
@@ -1801,6 +1813,7 @@ export const AgentChat = memo(function AgentChat({
                 arrived={arrived}
                 failed={failed.has(m.id)}
                 sending={sending.get(m.id)}
+                tidying={m.id === HELD_ID}
                 onRetry={retry}
                 queued={m.id === queuedId}
                 onInterrupt={interruptNow}
@@ -2362,7 +2375,7 @@ export const AgentChat = memo(function AgentChat({
                     agentName={agent.name}
                     inputRef={inputRef}
                     micRef={micRef}
-                    dictation={dictation}
+                    dictation={composerDictation}
                     mentionSet={mentionSet}
                     staged={staged}
                     onRemoveStaged={attachments.remove}

@@ -328,6 +328,8 @@ interface UserBubbleProps extends Arrival {
   driven?: boolean;
   /** Still copying its files in: the files as staged, shown while it sends. */
   sending?: DraftAttachment[];
+  /** Sent while dictation was still tidying its words: dimmed, "Tidying…", it goes once they're in. */
+  tidying?: boolean;
   /** "Remember this", with this message. */
   onRemember?: (message: AgentMessage) => void;
   /** Edit and resend, Fork from here, Rewind to here: what blocks them, and the pick. */
@@ -347,12 +349,13 @@ export const UserBubble = memo(function UserBubble({
   onInterrupt,
   driven,
   sending,
+  tidying,
   onRemember,
   goBack,
   onGoBack,
 }: UserBubbleProps) {
   const attachments = message.attachments ?? [];
-  const actions = !failed && !sending && (
+  const actions = !failed && !sending && !tidying && (
     <MessageActions
       text={message.text}
       ts={message.ts}
@@ -389,8 +392,8 @@ export const UserBubble = memo(function UserBubble({
       className="agent-chat__row agent-chat__row--user"
       data-arrived={arrived || undefined}
       data-failed={failed || undefined}
-      data-sending={sending ? '' : undefined}
-      aria-busy={sending ? true : undefined}
+      data-sending={sending || tidying ? '' : undefined}
+      aria-busy={sending || tidying ? true : undefined}
       data-attachments={attachments.length > 0 || Boolean(sending?.length) || undefined}
       data-message-ids={message.id}
     >
@@ -408,7 +411,7 @@ export const UserBubble = memo(function UserBubble({
       {message.text && (
         <div className="agent-chat__line">
           {actions}
-          {goBack && onGoBack && !failed && !sending ? (
+          {goBack && onGoBack && !failed && !sending && !tidying ? (
             <GoBackContextMenu
               state={goBack}
               text={message.text}
@@ -423,10 +426,16 @@ export const UserBubble = memo(function UserBubble({
         </div>
       )}
       {via && <div className="agent-chat__queued">{via}</div>}
-      {sending && (
+      {tidying ? (
         <div className="agent-chat__queued" role="status">
-          Sending…
+          Tidying…
         </div>
+      ) : (
+        sending && (
+          <div className="agent-chat__queued" role="status">
+            Sending…
+          </div>
+        )
       )}
       {queued && !failed && driven && (
         <div className="agent-chat__queued" role="status">

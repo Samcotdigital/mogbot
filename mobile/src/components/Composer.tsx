@@ -112,6 +112,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
+import type { ComposerDraft } from '../lib/drafts';
 import { MORPH_MS } from '../lib/wordMorph';
 import { LiveWords, type WordMorph } from './LiveWords';
 import { Waveform } from './Waveform';
@@ -151,7 +152,17 @@ import { haptic } from '../lib/haptics';
 import { useRouter } from 'expo-router';
 import { chipLabel } from '../lib/agentControls';
 import { OUTBOX_WAIT_MS } from '../lib/outbox';
-import { describeError, send, sendEdited, stop, tidyDictation, upload } from '../lib/session';
+import {
+  describeError,
+  discardPending,
+  holdTidying,
+  send,
+  sendEdited,
+  setHeldText,
+  stop,
+  tidyDictation,
+  upload,
+} from '../lib/session';
 import { getApp, useApp, useServed } from '../lib/store';
 import {
   keySize,
@@ -251,9 +262,24 @@ export function Composer({
     return () => clearTimeout(t);
   }, [restored]);
   const vocabulary = useMemo(() => team.map((a) => a.name), [team]);
-  const getDraft = useCallback(() => getApp().composer[agent.id]?.text ?? '', [agent.id]);
+  // Send pressed while the computer still tidies what was said: the message is
+  // already in the chat (dimmed, "Tidying…") and the field is free. The words
+  // still coming (the last ones, then the better ones) go to it, not the field.
+  const heldSend = useRef<{ clientId: string; draft: ComposerDraft; now: boolean } | null>(null);
+  // The field stops being the dictation card while a held message waits.
+  const [holding, setHolding] = useState(false);
+  const getDraft = useCallback(
+    () => heldSend.current?.draft.text ?? getApp().composer[agent.id]?.text ?? '',
+    [agent.id]
+  );
   const putSpoken = useCallback(
     (text: string) => {
+      const h = heldSend.current;
+      if (h) {
+        h.draft = { ...h.draft, text };
+        setHeldText(agent.id, h.clientId, text);
+        return;
+      }
       const mentions = getApp().composer[agent.id]?.mentions ?? [];
       setComposer(agent.id, { text, mentions: liveMentions(text, mentions) });
     },
@@ -287,7 +313,7 @@ export function Composer({
     if (!tidying) setEditingTidy(false);
   }, [tidying]);
   /** The field is the dictation card: listening, or tidying what it heard. */
-  const listening = dictation.phase !== 'idle' || (tidying && !editingTidy);
+  const listening = !holding && (dictation.phase !== 'idle' || (tidying && !editingTidy));
   // The better words arriving: the field shows the swap for a moment (only
   // the changed words move), then it's the editable text again.
   const [morph, setMorph] = useState<WordMorph | null>(null);
@@ -511,12 +537,66 @@ export function Composer({
     haptic.select();
   };
 
+  /**
+   * Send while the words are still coming (listening, or the computer tidying
+   * them): the message moves up into the chat at once, dimmed with
+   * "Tidying…", the field empties, and it goes once the better words are in
+   * (`sendWhenReady`: 15 s at most, then what it has).
+   */
+  const holdUntilTidied = (now: boolean) => {
+    const current = getApp().composer[agent.id];
+    const taken = takeDraft(current);
+    if (!current || !taken || heldSend.current) {
+      dictation.sendWhenReady(() => submit(now, true));
+      return;
+    }
+    if (now) haptic.medium();
+    else haptic.light();
+    const clientId = holdTidying(agent.id, current.text.trim(), taken.files, taken.mentions);
+    heldSend.current = { clientId, draft: current, now };
+    setHolding(true);
+    clearComposer(agent.id);
+    setStaged([]);
+    onSent();
+    dictation.sendWhenReady(sendHeld);
+  };
+
+  /** The held message's words are final: it goes, as Send would have. */
+  const sendHeld = () => {
+    const h = heldSend.current;
+    heldSend.current = null;
+    setHolding(false);
+    if (!h) return;
+    // The better words are in it now; nothing more comes.
+    dictation.drop();
+    const taken = takeDraft(h.draft);
+    if (!taken) {
+      discardPending(agent.id, h.clientId);
+      return;
+    }
+    setHeldText(agent.id, h.clientId, h.draft.text.trim(), false);
+    const answersCard = mode === 'queue' && waitingOnYou && !driven;
+    send(
+      agent.id,
+      taken.body,
+      h.now || answersCard,
+      h.clientId,
+      taken.files,
+      taken.mentions,
+      h.draft.revising
+    ).catch((error: unknown) => {
+      haptic.error();
+      onError(describeError(error));
+    });
+  };
+
   /** `ready`: the computer's better words are in (or weren't coming), so it goes now. */
   const submit = (now: boolean, ready = false) => {
     if (!canSend) return;
-    // Still tidying what was said: it goes once the better words are in.
+    // Still tidying what was said: it shows in the chat now and goes once the better words are in.
     if (!ready && dictation.tidying) {
-      dictation.sendWhenReady(() => submit(now, true));
+      if (draft.editing) dictation.sendWhenReady(() => submit(now, true));
+      else holdUntilTidied(now);
       return;
     }
     // From the store, not this render: a second tap in the same frame finds
@@ -564,7 +644,8 @@ export function Composer({
    */
   const dictationSend = () => {
     if (!canSend) return;
-    dictation.sendWhenReady(() => submit(false, true));
+    if (draft.editing || !improve) dictation.sendWhenReady(() => submit(false, true));
+    else holdUntilTidied(false);
   };
 
   // A voice message let go, its words all in: it sends, as Send would. Once per hold.

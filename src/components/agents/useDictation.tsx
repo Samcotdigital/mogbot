@@ -63,15 +63,23 @@ interface Options {
   enabled: boolean;
   /** The conversation so far, for the names pass (read when it starts). */
   getContext?: () => string;
+  /**
+   * Enter or Send while the words are still coming: the words leave the
+   * field at once (`held`, which the chat shows as a dimmed message with
+   * "Tidying…"), the last and better words go to them, and they're sent
+   * from the field when they're in. Without it they wait in the field.
+   */
+  holdOnSend?: boolean;
 }
 
 export function useDictation({
-  getDraft,
-  setDraft,
+  getDraft: getField,
+  setDraft: setField,
   getVocabulary,
   meterRef,
   enabled,
   getContext,
+  holdOnSend = false,
 }: Options) {
   const { showToast } = useOptionalToast();
   const [phase, setPhaseState] = useState<DictationPhase>('idle');
@@ -93,6 +101,22 @@ export function useDictation({
   /** The draft as the last dictation left it, until it's sent (to learn your fixes). */
   const dictatedRef = useRef<string | null>(null);
   const [preparing, setPreparing] = useState<number | null>(null);
+
+  /** Sent while the words were still coming: they live here, not in the field, until they go. */
+  const heldRef = useRef<string | null>(null);
+  const [held, setHeld] = useState<string | null>(null);
+  const getDraft = useCallback(() => heldRef.current ?? getField(), [getField]);
+  const setDraft = useCallback(
+    (text: string) => {
+      if (heldRef.current === null) {
+        setField(text);
+        return;
+      }
+      heldRef.current = text;
+      setHeld(text);
+    },
+    [setField]
+  );
 
   const setPhase = useCallback((next: DictationPhase) => {
     phaseRef.current = next;
@@ -148,7 +172,10 @@ export function useDictation({
           break;
         case 'ended':
           if (event.cancelled && phaseRef.current !== 'finishing') {
-            setDraft(originalRef.current);
+            // Cancelled: nothing goes, and a held message's field is the field again.
+            heldRef.current = null;
+            setHeld(null);
+            setField(originalRef.current);
             sendAfterRef.current = null;
           } else {
             dictatedRef.current = getDraft();
@@ -168,7 +195,7 @@ export function useDictation({
       unlisten?.();
       if (sessionRef.current !== null) void cancelDictation(sessionRef.current);
     };
-  }, [getDraft, setDraft, setLevel, setPhase, showToast]);
+  }, [getDraft, setDraft, setField, setLevel, setPhase, showToast]);
 
   // Enter or Send while listening: it goes once the words are in. After the
   // phase is idle (an effect), so the chat's send sees dictation over.
@@ -176,8 +203,20 @@ export function useDictation({
     if (phase !== 'idle' || !sendAfterRef.current) return;
     const send = sendAfterRef.current;
     sendAfterRef.current = null;
+    const words = heldRef.current;
+    if (words === null) {
+      send();
+      return;
+    }
+    // Held: the words go from the field as any message does, and whatever
+    // was typed there meanwhile is left for the next one.
+    heldRef.current = null;
+    const typed = getField();
+    setField(words);
     send();
-  }, [phase]);
+    setField(typed);
+    setHeld(null); // eslint-disable-line react-hooks/set-state-in-effect -- the held message gives way to the sent one in the same render
+  }, [phase, getField, setField]);
 
   // Undo goes after a few seconds, or as soon as the draft is changed.
   useEffect(() => {
@@ -260,6 +299,8 @@ export function useDictation({
   }, [setLevel, setPhase, showToast]);
 
   const cancel = useCallback(() => {
+    // Already sent (held for its better words): nothing to cancel.
+    if (heldRef.current !== null) return;
     holdingRef.current = false;
     sendAfterRef.current = null;
     if (phaseRef.current === 'starting') pendingRef.current = 'cancel';
@@ -305,9 +346,15 @@ export function useDictation({
     (send: () => void) => {
       if (phaseRef.current === 'idle') return send();
       sendAfterRef.current = send;
+      if (holdOnSend && heldRef.current === null) {
+        const words = getField();
+        heldRef.current = words;
+        setHeld(words);
+        setField('');
+      }
       if (phaseRef.current === 'listening' || phaseRef.current === 'starting') stop();
     },
-    [stop]
+    [stop, holdOnSend, getField, setField]
   );
 
   const toggle = useCallback(() => {
@@ -399,6 +446,8 @@ export function useDictation({
     toggle,
     cancel,
     stopAndSend,
+    /** The words of a message sent before they were all in (`holdOnSend`): show it as on its way. */
+    held,
     onComposerKeyDown,
     /** Offered for a few seconds after better words replaced the live ones. */
     undo: undo ? undoTidy : null,

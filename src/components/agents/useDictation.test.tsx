@@ -22,7 +22,7 @@ vi.mock('../../lib/dictation', async (importOriginal) => ({
 
 import { useDictation } from './useDictation';
 
-function setup(initial = 'Hi') {
+function setup(initial = 'Hi', holdOnSend = false) {
   let draft = initial;
   const setDraft = vi.fn((text: string) => {
     draft = text;
@@ -34,6 +34,7 @@ function setup(initial = 'Hi') {
       getVocabulary: () => Promise.resolve(['Finance']),
       meterRef: { current: null },
       enabled: true,
+      holdOnSend,
     })
   );
   return {
@@ -161,6 +162,47 @@ describe('useDictation', () => {
     act(() => emit({ kind: 'ended', session: 7, cancelled: false }));
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.results[0].value).toBe('Hi Tell Mogbot.');
+  });
+
+  it('held: Enter empties the field at once, the better words go to the message, then it sends', async () => {
+    const { hook, draft, type } = setup('Hi', true);
+    await act(async () => {
+      hook.result.current.toggle();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    act(() => emit({ kind: 'partial', session: 7, text: 'tell mogbert' }));
+    const send = vi.fn(() => draft());
+    act(() => {
+      hook.result.current.onComposerKeyDown(
+        { key: 'Enter', code: 'Enter', preventDefault: () => {} } as unknown as Parameters<
+          typeof hook.result.current.onComposerKeyDown
+        >[0],
+        send
+      );
+    });
+    // Moved up: the field is empty, the message shows as held.
+    expect(draft()).toBe('');
+    expect(hook.result.current.held).toBe('Hi tell mogbert');
+    act(() => emit({ kind: 'final', session: 7, text: 'tell mogbert' }));
+    act(() => emit({ kind: 'improving', session: 7 }));
+    act(() =>
+      emit({
+        kind: 'improved',
+        session: 7,
+        text: 'Tell Mogbot.',
+        raw: 'Tell Mogbert.',
+        tidied: true,
+      })
+    );
+    expect(hook.result.current.held).toBe('Hi Tell Mogbot.');
+    expect(draft()).toBe('');
+    // Typed meanwhile: kept for the next message.
+    type('next one');
+    act(() => emit({ kind: 'ended', session: 7, cancelled: false }));
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.results[0].value).toBe('Hi Tell Mogbot.');
+    expect(draft()).toBe('next one');
+    expect(hook.result.current.held).toBeNull();
   });
 
   it('the tidied words replace the live ones, and Undo puts them back', async () => {
