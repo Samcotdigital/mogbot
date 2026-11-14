@@ -1,15 +1,17 @@
 /**
- * The dictation card's top line, in place of the words: no words show while
- * you talk (the waveform under it is your voice), only "● Listening · 0:42",
- * or, the moment the mic isn't hearing you, "Can't hear you · check the mic"
- * in the warning colour. While the computer writes the words out:
- * "Tidying…". The rule is the desk's (companion-protocol, listening.ts).
+ * The dictation row's middle, between × and Stop/Send: no words show while
+ * you talk, only "● 0:42" and your voice as a wave beside it, on the row
+ * itself (nothing above the composer, no second line in it). The moment the
+ * mic isn't hearing you, the wave gives way to "Can't hear you · check the
+ * mic" in the warning colour. Stopped, while the computer writes the words
+ * out: "Tidying…" alone, once. The rule is the desk's (companion-protocol,
+ * listening.ts). A tap is Stop and edit.
  *
  * It keeps its own clock, so the composer doesn't re-render while you talk.
  */
 import { elapsedLabel, hearing, hearingLine } from '@shipstudio/companion-protocol';
-import { useEffect, useState, type RefObject } from 'react';
-import { View } from 'react-native';
+import { useEffect, useState, type ReactNode, type RefObject } from 'react';
+import { Pressable, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useAccent } from '../lib/accent';
 import { useColors } from '../lib/appearance';
 import { PILL_DOT, space } from '../lib/theme';
@@ -30,9 +32,18 @@ const TICK_MS = 250;
 export function ListeningLine({
   meter,
   tidying,
+  onPress,
+  height,
+  style,
+  children,
 }: {
   meter: RefObject<ListeningMeter>;
   tidying: boolean;
+  onPress: () => void;
+  height: number;
+  style?: StyleProp<ViewStyle>;
+  /** The waveform, shown beside the clock while it hears you. */
+  children: ReactNode;
 }) {
   const colors = useColors();
   const accent = useAccent();
@@ -54,27 +65,39 @@ export function ListeningLine({
   // The phone's own recogniser always runs, so words are expected.
   const warning = tidying ? null : hearingLine(hearing({ now, ...m, wordsExpected: true }), null);
   const ink = warning ? colors.accentWarning : colors.textMuted;
-  const words = tidying
-    ? 'Tidying…'
-    : (warning ?? `Listening · ${elapsedLabel(now - m.startedAt)}`);
+  const words = tidying ? 'Tidying…' : (warning ?? elapsedLabel(now - m.startedAt));
   return (
-    <View
-      style={{ flexDirection: 'row', alignItems: 'center', gap: space.tight }}
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="text"
       accessibilityLiveRegion="polite"
-      accessibilityLabel={words}
+      accessibilityLabel={tidying || warning ? words : `Listening, ${words}`}
+      accessibilityHint="Double-tap to stop and edit"
       testID="dictation-line"
+      style={[
+        { flex: 1, height, flexDirection: 'row', alignItems: 'center', gap: space.sm },
+        style,
+      ]}
     >
-      <View
-        style={{
-          width: PILL_DOT,
-          height: PILL_DOT,
-          borderRadius: PILL_DOT / 2,
-          backgroundColor: warning ? colors.accentWarning : accent.accent,
-        }}
-      />
-      <T variant="body" color={ink} style={{ fontVariant: ['tabular-nums'] }}>
+      {!tidying && (
+        <View
+          style={{
+            width: PILL_DOT,
+            height: PILL_DOT,
+            borderRadius: PILL_DOT / 2,
+            backgroundColor: warning ? colors.accentWarning : accent.accent,
+          }}
+        />
+      )}
+      <T
+        variant="subhead"
+        color={ink}
+        numberOfLines={1}
+        style={[{ fontVariant: ['tabular-nums'] }, warning ? { flexShrink: 1 } : null]}
+      >
         {words}
       </T>
-    </View>
+      {!tidying && !warning ? children : null}
+    </Pressable>
   );
 }

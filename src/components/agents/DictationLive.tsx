@@ -1,8 +1,8 @@
 /**
- * The listening line under the composer while you dictate: no words, only
- * your voice as a wave across the row, how long it's been, and, the moment
+ * The composer's one row while you dictate, where the text was: no words,
+ * only "● 0:42" and your voice as a wave filling the row, and, the moment
  * the mic isn't hearing you, "Can't hear you · check the mic (its name)" in
- * place of "Listening". Then "Tidying…" while the words are written out.
+ * place of the time. Then "Tidying…" alone while the words are written out.
  *
  * It keeps its own clock (four times a second) and draws the wave on a
  * canvas from the meter's levels, so nothing else re-renders while you talk.
@@ -58,12 +58,11 @@ export function DictationLive({
       {live ? (
         <ListeningClock meter={meter} />
       ) : (
-        <>
-          <span className="agent-composer__listening-dot" aria-hidden />
+        <span className="agent-composer__listening-clock" data-hearing="ok">
           {phase === 'tidying' ? 'Tidying…' : 'Finishing…'}
-        </>
+        </span>
       )}
-      <DictationWave meter={meter} live={live} />
+      {live ? <DictationWave meter={meter} live /> : <span className="agent-composer__wave" />}
       <TextButton tabIndex={0} onClick={onCancel}>
         Cancel
       </TextButton>
@@ -84,13 +83,9 @@ function ListeningClock({ meter }: { meter: DictationMeter }) {
     <span className="agent-composer__listening-clock" data-hearing={state}>
       <span className="agent-composer__listening-dot" aria-hidden />
       {warning ?? (
-        <>
-          Listening
-          <span aria-hidden>·</span>
-          <span className="agent-composer__listening-time">
-            {elapsedLabel(now - meter.startedAt)}
-          </span>
-        </>
+        <span className="agent-composer__listening-time" aria-label="Listening">
+          {elapsedLabel(now - meter.startedAt)}
+        </span>
       )}
     </span>
   );

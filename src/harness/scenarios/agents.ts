@@ -3719,7 +3719,7 @@ export const agentsScenarios: Scenario[] = [
     id: 'agents-dictating',
     title: 'Agents — dictating into the composer',
     looksRightWhen:
-      'No words show while you talk. The row under the field reads ● Listening · 0:00 at its left, then your voice as a wave of thin bars filling the width (newest at the right), then Cancel. The mic is lit and the composer border tinted; the paperclip stays put. Nothing reads as an error, and Send is unchanged.',
+      'One row, no words while you talk: the paperclip, then ● 0:00 where the text was, your voice as a wave of thin bars filling the row (newest at the right), Cancel, then the lit mic and Send. No second line under it; the composer stays one row tall with its border tinted. Nothing reads as an error.',
     // Steps run before a palette command, so walk in through the sidebar.
     openSelector: AGENTS_TAB,
     requires: '.agent-composer[data-dictation="listening"]',
@@ -3737,7 +3737,7 @@ export const agentsScenarios: Scenario[] = [
     id: 'agents-dictating-long',
     title: 'Agents — a long dictation after typed text',
     looksRightWhen:
-      'Only “Quick one:” (typed first) shows in the field; the spoken sentences do not appear while listening. Under it the listening row: ● Listening · time, the wave, Cancel.',
+      'Neither the typed “Quick one:” nor the spoken sentences show while listening: one row, ● time, the wave, Cancel. The typed words come back with the tidied ones.',
     openSelector: AGENTS_TAB,
     requires: '.agent-composer[data-dictation="listening"]',
     clipSelector: '.agent-chat__footer',

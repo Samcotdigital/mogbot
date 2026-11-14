@@ -702,7 +702,7 @@ export function Composer({
       : (listeningNote(dictation.via) ?? 'Let go to send · slide away to cancel')
     : listening
       ? tidying && dictation.phase === 'idle'
-        ? 'Tidying…'
+        ? null
         : (listeningNote(dictation.via) ?? queued)
       : problem
         ? problem.text
@@ -890,15 +890,7 @@ export function Composer({
           inputRef={input}
           dictation={
             listening
-              ? {
-                  settled: '',
-                  deciding: '',
-                  onPress: editDictation,
-                  tidying: tidying && dictation.phase === 'idle',
-                  line: (
-                    <ListeningLine meter={heard} tidying={tidying && dictation.phase === 'idle'} />
-                  ),
-                }
+              ? { settled: '', deciding: '', onPress: editDictation, bare: true }
               : morphing
                 ? { settled: '', deciding: '', morph, onPress: () => setMorph(null) }
                 : undefined
@@ -987,13 +979,16 @@ export function Composer({
             </RoundButton>
           )}
           {listening && !held && (
-            <Waveform
+            <ListeningLine
               key="dictation-waveform"
-              level={level}
+              meter={heard}
+              tidying={tidying && dictation.phase === 'idle'}
+              onPress={editDictation}
               height={size.send}
-              fill
               style={field.wave}
-            />
+            >
+              <Waveform level={level} height={size.send} fill />
+            </ListeningLine>
           )}
           {listening && !held && (
             <RoundButton
@@ -1216,8 +1211,8 @@ export function ComposerField({
     tidying?: boolean;
     /** The better words arriving: only the changed ones swap (`LiveWords`). */
     morph?: WordMorph | null;
-    /** In place of the words: the listening line (`ListeningLine`). */
-    line?: ReactNode;
+    /** No words area at all: the row's listening line says it (`ListeningLine`). */
+    bare?: boolean;
   };
   /**
    * The mic is held (a voice message): the field keeps the shape it had when
@@ -1336,113 +1331,116 @@ export function ComposerField({
       {top ? <View style={field.top}>{top}</View> : null}
       <View style={card ? null : [field.pill, leading ? field.pillLed : null]}>
         {!card && leading ? leading : null}
-        <View
-          style={[
-            card ? null : field.words,
-            {
-              paddingLeft: card
-                ? composer.padLeft
-                : leading
-                  ? composer.afterLead
-                  : composer.padLeft,
-            },
-          ]}
-        >
-          <ScrollView
-            ref={scroll}
-            style={{ maxHeight: size.maxHeight }}
-            // Listening, it only follows: a tap on the words is Stop and edit.
-            scrollEnabled={!dictation}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            onContentSizeChange={follow}
-            onScroll={onScroll}
-            scrollEventThrottle={16}
+        {dictation?.bare ? null : (
+          <View
+            style={[
+              card ? null : field.words,
+              {
+                paddingLeft: card
+                  ? composer.padLeft
+                  : leading
+                    ? composer.afterLead
+                    : composer.padLeft,
+              },
+            ]}
           >
-            {dictation ? (
-              <Pressable
-                onPress={dictation.onPress}
-                accessibilityRole="text"
-                accessibilityLabel={
-                  empty ? 'Listening' : `${label}: ${dictation.settled}${dictation.deciding}`
-                }
-                accessibilityHint="Double-tap to stop and edit"
-                accessibilityLiveRegion="polite"
-              >
-                {dictation.line ? (
-                  dictation.line
-                ) : (
-                  <Text maxFontSizeMultiplier={chromeScale} style={[field.input, field.cardInput]}>
-                    {empty ? (
-                      <>
-                        <Caret />
-                        <Text style={{ color: colors.textMuted }}>{placeholder}</Text>
-                      </>
-                    ) : (
-                      <>
-                        <LiveWords
-                          settled={dictation.settled}
-                          deciding={dictation.deciding}
-                          tidying={dictation.tidying}
-                          morph={dictation.morph}
-                        />
-                        {!dictation.tidying && !dictation.morph && <Caret />}
-                      </>
-                    )}
-                  </Text>
-                )}
-              </Pressable>
-            ) : (
-              <View>
-                <TextInput
-                  ref={own}
-                  maxFontSizeMultiplier={chromeScale}
-                  value={value}
-                  autoFocus={autoFocus}
-                  editable={editable}
-                  onChangeText={onChangeText}
-                  onSelectionChange={(e) =>
-                    setCaret({ at: e.nativeEvent.selection, length: value.length, listening })
+            <ScrollView
+              ref={scroll}
+              style={{ maxHeight: size.maxHeight }}
+              // Listening, it only follows: a tap on the words is Stop and edit.
+              scrollEnabled={!dictation}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              onContentSizeChange={follow}
+              onScroll={onScroll}
+              scrollEventThrottle={16}
+            >
+              {dictation ? (
+                <Pressable
+                  onPress={dictation.onPress}
+                  accessibilityRole="text"
+                  accessibilityLabel={
+                    empty ? 'Listening' : `${label}: ${dictation.settled}${dictation.deciding}`
                   }
-                  onLayout={fitWeb}
-                  multiline
-                  // The field scrolls around it: the input is always as tall as its words.
-                  scrollEnabled={false}
-                  style={[
-                    field.input,
-                    card && field.cardInput,
-                    value.length === 0 && { maxHeight: emptyHeight(size.field, card) },
-                  ]}
-                  selectionColor={accent.accent}
-                  keyboardAppearance={appearance}
-                  accessibilityLabel={label}
-                />
-                {value.length === 0 ? (
-                  // Drawn here, not by the input: a multiline input wraps its
-                  // placeholder while the field is still laying out, so the empty
-                  // capsule showed it on two lines for a moment. One line, clipped.
-                  <Text
-                    pointerEvents="none"
-                    accessibilityElementsHidden
-                    importantForAccessibility="no"
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
+                  accessibilityHint="Double-tap to stop and edit"
+                  accessibilityLiveRegion="polite"
+                >
+                  {
+                    <Text
+                      maxFontSizeMultiplier={chromeScale}
+                      style={[field.input, field.cardInput]}
+                    >
+                      {empty ? (
+                        <>
+                          <Caret />
+                          <Text style={{ color: colors.textMuted }}>{placeholder}</Text>
+                        </>
+                      ) : (
+                        <>
+                          <LiveWords
+                            settled={dictation.settled}
+                            deciding={dictation.deciding}
+                            tidying={dictation.tidying}
+                            morph={dictation.morph}
+                          />
+                          {!dictation.tidying && !dictation.morph && <Caret />}
+                        </>
+                      )}
+                    </Text>
+                  }
+                </Pressable>
+              ) : (
+                <View>
+                  <TextInput
+                    ref={own}
                     maxFontSizeMultiplier={chromeScale}
+                    value={value}
+                    autoFocus={autoFocus}
+                    editable={editable}
+                    onChangeText={onChangeText}
+                    onSelectionChange={(e) =>
+                      setCaret({ at: e.nativeEvent.selection, length: value.length, listening })
+                    }
+                    onLayout={fitWeb}
+                    multiline
+                    // The field scrolls around it: the input is always as tall as its words.
+                    scrollEnabled={false}
                     style={[
                       field.input,
                       card && field.cardInput,
-                      field.placeholder,
-                      { color: colors.textMuted },
+                      value.length === 0 && { maxHeight: emptyHeight(size.field, card) },
                     ]}
-                  >
-                    {placeholder}
-                  </Text>
-                ) : null}
-              </View>
-            )}
-          </ScrollView>
-          {scrolled && <FieldFade />}
-        </View>
+                    selectionColor={accent.accent}
+                    keyboardAppearance={appearance}
+                    accessibilityLabel={label}
+                  />
+                  {value.length === 0 ? (
+                    // Drawn here, not by the input: a multiline input wraps its
+                    // placeholder while the field is still laying out, so the empty
+                    // capsule showed it on two lines for a moment. One line, clipped.
+                    <Text
+                      pointerEvents="none"
+                      accessibilityElementsHidden
+                      importantForAccessibility="no"
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                      maxFontSizeMultiplier={chromeScale}
+                      style={[
+                        field.input,
+                        card && field.cardInput,
+                        field.placeholder,
+                        { color: colors.textMuted },
+                      ]}
+                    >
+                      {placeholder}
+                    </Text>
+                  ) : null}
+                </View>
+              )}
+            </ScrollView>
+            {scrolled && <FieldFade />}
+          </View>
+        )}
         {card ? null : children}
       </View>
       {card ? (

@@ -1557,7 +1557,7 @@ const LIVE = [
       await sleep(2300);
     },
     check:
-      'Listening: no words, the card’s top line “● Listening · 0:0x”; × in the +’s place, the waveform, then Stop and Send (accent); no mic',
+      'Listening: one row, no words and nothing above it: × in the +’s place, “● 0:0x” then the waveform, then Stop and Send (accent); no mic',
     after: async (page) => {
       await page.clickLabel('Cancel dictation').catch(() => {});
       await sleep(600);
@@ -1591,7 +1591,7 @@ const LIVE = [
       await sleep(250);
     },
     check:
-      'Stopped, the computer writing it out: the card stays with “● Tidying…” where the words would be (no words yet), × and Send; Stop dimmed',
+      'Stopped, the computer writing it out: one row, “Tidying…” once between × and Stop/Send (no dot, no wave, nothing above the composer); Stop dimmed',
     after: async (page) => {
       await page.clickLabel('Cancel dictation').catch(() => {});
       await sleep(600);
@@ -1642,7 +1642,7 @@ const LIVE = [
       await sleep(5200);
     },
     check:
-      'A long dictation while listening: still no words, only “● Listening · 0:0x” and the waveform beside Stop and Send',
+      'A long dictation while listening: still no words, only “● 0:0x” and the waveform beside Stop and Send',
     after: async (page) => {
       await page.clickLabel('Cancel dictation').catch(() => {});
       await page.eval(`globalThis.__qaDictation = {}`);

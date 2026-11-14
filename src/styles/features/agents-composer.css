@@ -63,12 +63,36 @@
   order: 1;
 }
 
-/* "● Listening · Cancel": its own small row under the text, starting where
-   the text starts, so the words arriving keep the field's full width and the
-   paperclip keeps its place (beside it, it squeezed them into a column). */
+/* "Couldn't write that out · Try again": its own small row under the
+   words it put back, starting where the text starts. */
 .agent-composer__bar > .agent-composer__listening {
   grid-column: 2 / -1;
   order: 4;
+}
+
+/* Dictating, the composer is one row: the paperclip, "● 0:42" and the wave
+   where the text was, Cancel, then [mic] [send]. No words show while you
+   talk, so the field steps aside: still focused underneath for Enter and
+   Esc, but takes no room and can't be clicked. */
+.agent-composer:not([data-dictation='idle']) .agent-composer__input {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.agent-composer:not([data-dictation='idle']) .agent-composer__bar > .agent-composer__listening {
+  grid-column: 2;
+  order: 2;
+  align-self: center;
+  padding: 0 var(--spacing-xs);
+  min-height: calc(var(--agent-composer-line) + (var(--spacing-xs) * 2));
+}
+
+/* The time and the warning at the size the words will be; Cancel stays small. */
+.agent-composer:not([data-dictation='idle']) .agent-composer__listening-clock {
+  font-size: var(--font-size-subhead-lg);
 }
 
 .agent-composer__bar > .agent-composer__hint {
