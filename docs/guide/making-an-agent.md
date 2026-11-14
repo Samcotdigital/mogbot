@@ -90,18 +90,23 @@ An agent works on one thing at a time. Messages sent while it's busy wait their 
 
 ## Dictation
 
-Click the microphone in the message box (or press ⌘⇧D, or hold ⌥Space) and talk. On a Mac your words
-appear as you speak. **Enter** (or Send) stops and sends; **Esc** cancels.
+Click the microphone in the message box (or press ⌘⇧D, or hold ⌥Space) and talk. No words show
+while you talk: under the box your voice moves as a wave, beside **Listening** and how long it's been.
+If the mic hears nothing for three seconds, the line says **Can't hear you · check the mic** and names
+the microphone it's using, so you never talk for minutes into a dead mic; if it hears sound but no
+words for ten seconds (a muted or wrong input), it says that instead. **Enter** (or Send) stops and
+sends; **Esc** cancels. The phone works the same way.
 
-When you stop, your computer writes what you said out again with Whisper, a speech model that runs
-on your computer, primed with your agents' and projects' names. Then a quick pass by Claude (Haiku,
-with no tools) fixes only misheard names and punctuation, using the conversation you're in. The box
-says **Tidying…** for a few seconds, then shows the better words; **Undo** puts back what it first
-heard. On the phone your words come out one after another as you speak, stay in the box while that happens, with a soft light passing over
-them, then only the words that changed swap, lit for a moment. Send while it's still listening or
-tidying, on the Mac or the phone, and the message moves up into the chat at once, dimmed with
-**Tidying…** under it; it goes by itself once the better words are in, and the box is free for your
-next message. If Claude Code isn't set up, you get Whisper's words alone.
+When you stop, your computer writes what you said out with Whisper, a speech model that runs on your
+computer, primed with your agents' and projects' names. Then a quick pass by Claude (Haiku, with no
+tools) fixes only misheard names and punctuation, using the conversation you're in. It says
+**Tidying…** for a few seconds, then the words appear in the box. Long dictations are written out as
+you go, a piece at a time, so stopping after five minutes only waits for the last bit. Send while it's
+still listening or tidying, on the Mac or the phone, and the message moves up into the chat at once,
+dimmed, with a little wave in it and **Tidying…** under it; it goes by itself once the words are in,
+and the box is free for your next message. If Claude Code isn't set up, you get Whisper's words alone.
+If the words can't be written out, the recording stays on your computer and the box says **Couldn't
+write that out · Try again**.
 
 **Your words.** Settings → Agents → Dictation keeps the names and terms dictation should always get
 right. Add one there, or just fix it: when you change the same dictated word twice before sending
@@ -110,7 +115,8 @@ words and the fixes you've made, on the desk and for the phone's dictation. Remo
 learned again unless you add it back.
 
 The speech model is a one-time 574 MB download, fetched the first time you dictate. It loads when you start talking (or open a chat on your phone) and stays loaded for 10 minutes after your last dictation, so the better words come quickly. On Windows and
-Linux dictation waits for it ("Getting dictation ready"); on a Mac you get the live words meanwhile.
+Linux dictation waits for it ("Getting dictation ready"); on a Mac you get the Mac's own recognition
+meanwhile.
 Your recording never leaves your computer. Only the written words go to the names pass, on your own
 Claude account.
 

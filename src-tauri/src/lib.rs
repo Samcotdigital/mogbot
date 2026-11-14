@@ -1157,6 +1157,7 @@ pub fn run() {
             // Dictation (on-device speech to text)
             commands::dictation::start_dictation,
             commands::dictation::stop_dictation,
+            commands::dictation::retry_dictation,
             commands::dictation::cancel_dictation,
             commands::dictation::dictation_model_status,
             commands::dictation::dictation_model_download,

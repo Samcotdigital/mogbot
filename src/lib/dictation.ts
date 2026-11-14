@@ -26,7 +26,7 @@ export type DictationBlock =
   | 'dictationOff';
 
 export type DictationStart =
-  | { status: 'listening'; session: number }
+  | { status: 'listening'; session: number; mic?: string }
   | { status: 'blocked'; reason: DictationBlock };
 
 export type DictationEvent =
@@ -36,6 +36,8 @@ export type DictationEvent =
   | { kind: 'error'; session: number; message: string }
   | { kind: 'improving'; session: number }
   | { kind: 'improved'; session: number; text: string; raw: string; tidied: boolean }
+  // It heard you but couldn't write it out; the recording is kept for Try again.
+  | { kind: 'unwritten'; session: number }
   | { kind: 'ended'; session: number; cancelled: boolean };
 
 /**
@@ -104,6 +106,24 @@ export function dictationContext(lines: { who: string; text: string }[], max = 2
 export function stopDictation(session: number): Promise<void> {
   return invoke('stop_dictation', { session });
 }
+
+/** Write out again a recording that couldn't be (after `unwritten`). */
+export function retryDictation(session: number): Promise<void> {
+  return invoke('retry_dictation', { session });
+}
+
+// Whether the mic is really hearing you, and the listening line's words:
+// one rule for desk and phone (companion-protocol, listening.ts).
+export {
+  VOICE_LEVEL,
+  SILENT_FIRST_MS,
+  SILENT_AFTER_MS,
+  NO_WORDS_MS,
+  hearing,
+  hearingLine,
+  elapsedLabel,
+  type Hearing,
+} from '../../packages/companion-protocol/src/listening';
 
 export function cancelDictation(session: number): Promise<void> {
   return invoke('cancel_dictation', { session });

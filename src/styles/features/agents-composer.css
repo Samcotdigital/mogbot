@@ -295,6 +295,53 @@
   color: var(--text-secondary);
 }
 
+/* Listening and tidying: the line runs the field's width, the wave
+   filling what the clock and Cancel leave. */
+.agent-composer__listening[data-phase] {
+  justify-self: stretch;
+  min-width: 0;
+}
+
+.agent-composer__listening-clock {
+  display: inline-flex;
+  flex: none;
+  gap: var(--spacing-xs);
+  align-items: center;
+  white-space: nowrap;
+}
+
+.agent-composer__listening-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+/* "Can't hear you": said at once, in the warning colour, dot included. */
+.agent-composer__listening-clock:not([data-hearing='ok']) {
+  color: var(--accent-warning);
+}
+
+.agent-composer__listening-clock:not([data-hearing='ok']) .agent-composer__listening-dot {
+  background: var(--accent-warning);
+  animation: none;
+}
+
+.agent-composer__wave {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--size-control-compact);
+  color: var(--text-primary);
+  --wave-quiet: var(--text-muted);
+}
+
+/* Tidying: the last shape held, dimmed. */
+.agent-composer__wave:not([data-live]) {
+  opacity: 0.4;
+}
+
+.agent-composer__listening[data-failed] {
+  color: var(--accent-warning);
+}
+
 .agent-composer__listening-dot {
   width: var(--size-sidebar-status-indicator);
   height: var(--size-sidebar-status-indicator);

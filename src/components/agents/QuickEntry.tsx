@@ -284,7 +284,14 @@ export function QuickEntry() {
             aria-label="Attach a screenshot"
             title="Attach a screenshot: drag to select, or press Space and click a window"
           />
-          {dictating && <ListeningStatus phase={dictation.phase} onCancel={dictation.cancel} />}
+          {(dictating || dictation.retry) && (
+            <ListeningStatus
+              phase={dictation.phase}
+              meter={dictation.meter}
+              onCancel={dictation.cancel}
+              onRetry={dictation.retry}
+            />
+          )}
           <div className="agent-composer__actions">
             <IconButton
               ref={micRef}

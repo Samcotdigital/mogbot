@@ -23,7 +23,6 @@ import {
 } from 'react';
 import { ArrowUpIcon, MicrophoneIcon, PaperclipIcon } from '@/components/icons';
 import { IconButton } from '../primitives/IconButton';
-import { TextButton } from '../primitives/TextButton';
 import { TextArea } from '../primitives/TextField';
 import { ComposerAttachments, ComposerQuotes } from './AgentAttachments';
 import { ComposerRevising } from './AgentResult';
@@ -34,7 +33,8 @@ import type { DraftAttachment } from './useComposerAttachments';
 import { sortAgents, type Agent, type ResultRef } from '../../lib/agents';
 import { getAgentsSnapshot } from '../../lib/agentsStore';
 import { setComposerDraft, useComposerDraft } from '../../lib/composerDraft';
-import type { DictationPhase } from './useDictation';
+import type { DictationMeter, DictationPhase } from './useDictation';
+import { DictationLive } from './DictationLive';
 import { noteQueueHintUse, queueHintLearned } from '../../lib/queueHint';
 
 /** A second Esc within this long stops a working agent; the first only says so. */
@@ -47,8 +47,10 @@ export interface ComposerDictation {
   cancel: () => void;
   stopAndSend: (send: () => void) => void;
   onComposerKeyDown: (e: KeyboardEvent, send?: () => void) => boolean;
-  /** Put the live words back, offered a few seconds after they were tidied. */
-  undo: (() => void) | null;
+  /** This dictation as it's heard: the wave, the time, "Can't hear you". */
+  meter: DictationMeter;
+  /** Heard but couldn't be written out: Try again. */
+  retry: (() => void) | null;
 }
 
 /** Send works while listening (it stops, then sends); not while tidying. */
@@ -97,50 +99,21 @@ interface AgentComposerProps {
 }
 
 /**
- * "● Listening · ↵ sends · Cancel" while dictating, "Tidying…" while the
- * words are written out again, then "Tidied · Undo" for a few seconds: its
- * own small row under the text (the CSS places it), so it never takes width
- * from the words arriving.
+ * The dictation line under the field: the wave and clock while listening,
+ * "Tidying…", or "Couldn't write that out · Try again" (DictationLive).
  */
 export function ListeningStatus({
   phase,
+  meter,
   onCancel,
-  onUndo,
+  onRetry,
 }: {
   phase: DictationPhase;
+  meter: DictationMeter;
   onCancel: () => void;
-  onUndo?: (() => void) | null;
+  onRetry?: (() => void) | null;
 }) {
-  if (phase === 'idle') {
-    if (!onUndo) return null;
-    return (
-      <span className="agent-composer__listening" data-tidied role="status">
-        Tidied the names and words
-        <span aria-hidden>·</span>
-        <TextButton tabIndex={0} onClick={onUndo}>
-          Undo
-        </TextButton>
-      </span>
-    );
-  }
-  const words =
-    phase === 'tidying' ? 'Tidying…' : phase === 'finishing' ? 'Finishing…' : 'Listening';
-  return (
-    <span className="agent-composer__listening" data-phase={phase} role="status">
-      <span className="agent-composer__listening-dot" aria-hidden />
-      {words}
-      {phase === 'listening' && (
-        <span className="agent-composer__listening-keys" aria-hidden>
-          <span>·</span>
-          <kbd className="agent-composer__key">↵</kbd> sends
-        </span>
-      )}
-      <span aria-hidden>·</span>
-      <TextButton tabIndex={0} onClick={onCancel}>
-        Cancel
-      </TextButton>
-    </span>
-  );
+  return <DictationLive phase={phase} meter={meter} onCancel={onCancel} onRetry={onRetry} />;
 }
 
 /**
@@ -364,11 +337,12 @@ export const AgentComposer = memo(function AgentComposer({
           aria-label="Attach files"
           title="Attach files, or paste or drop them here"
         />
-        {(dictating || dictation.undo) && (
+        {(dictating || dictation.retry) && (
           <ListeningStatus
             phase={dictation.phase}
+            meter={dictation.meter}
             onCancel={dictation.cancel}
-            onUndo={dictation.undo}
+            onRetry={dictation.retry}
           />
         )}
         {/* Its own row above the text, so a long hint never squeezes it. */}

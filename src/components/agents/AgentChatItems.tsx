@@ -10,6 +10,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
@@ -337,6 +338,9 @@ interface UserBubbleProps extends Arrival {
   onGoBack?: (action: GoBackAction, message: AgentMessage) => void;
 }
 
+/** The held voice message's bars, as heights 0..1. */
+const VOICE_BARS = [0.3, 0.55, 0.8, 0.45, 0.95, 0.6, 0.35, 0.7, 1, 0.5, 0.75, 0.4, 0.6, 0.3];
+
 /** Attachments sit above the words, both against the right edge, as one message. */
 export const UserBubble = memo(function UserBubble({
   message,
@@ -370,6 +374,14 @@ export const UserBubble = memo(function UserBubble({
   const bubble = (
     <div className="agent-bubble agent-bubble--user">
       {message.revises && <RevisesBar revises={message.revises} />}
+      {tidying && !message.text.trim() && (
+        // Sent before its words were written out: your voice, until they are.
+        <span className="agent-bubble__wave" role="img" aria-label="What you said">
+          {VOICE_BARS.map((h, i) => (
+            <span key={i} style={{ '--bar': h } as CSSProperties} />
+          ))}
+        </span>
+      )}
       {splitQuotes(message.text).map((part, i) =>
         part.kind === 'quote' ? (
           <blockquote key={i} className="agent-bubble__quote">
@@ -408,7 +420,7 @@ export const UserBubble = memo(function UserBubble({
           <MessageAttachments agent={agent} attachments={attachments} />
         </div>
       )}
-      {message.text && (
+      {(message.text || tidying) && (
         <div className="agent-chat__line">
           {actions}
           {goBack && onGoBack && !failed && !sending && !tidying ? (

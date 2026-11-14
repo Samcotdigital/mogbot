@@ -6,13 +6,19 @@
  * goes after whatever was already in the draft. Enter (or Send) while
  * listening stops and sends once the words are in.
  *
- * When it stops, the computer writes the words out again (Whisper, then a
- * pass that knows the team's names: src-tauri/src/voice): "Tidying…", then
- * the better words replace the live ones, with Undo for a few seconds. On
- * Windows and Linux there are no live words, only that.
+ * While it listens no words show, only your voice as a wave, how long it's
+ * been, and "Can't hear you" the moment the mic hears nothing (`meter`,
+ * drawn by DictationLive). When it stops, the computer writes the words out
+ * (Whisper, then a pass that knows the team's names: src-tauri/src/voice):
+ * "Tidying…", then they appear. macOS's live recogniser still runs, unseen:
+ * its words are kept in case the writing out can't happen (no model yet),
+ * and sound with no words from it for a while says so. A recording that was
+ * heard but couldn't be written out is kept on the computer: "Couldn't write
+ * that out · Try again" (`failed`, `retry`).
  *
- * The level meter is written straight to a CSS variable on `meterRef`, so the
- * ~15 updates a second don't re-render the conversation.
+ * The level goes straight to a CSS variable on `meterRef` and to the
+ * meter's listeners, so the ~15 updates a second don't re-render the
+ * conversation.
  */
 import {
   useCallback,
@@ -34,23 +40,42 @@ import {
   onDictationEvent,
   removeDictationWord,
   onDictationModel,
+  retryDictation,
   startDictation,
+  VOICE_LEVEL,
   stopDictation,
   type DictationBlock,
 } from '../../lib/dictation';
 import { asCommandError, formatCommandError } from '../../lib/errors';
+import { isMac } from '../../lib/setup';
 
 export type DictationPhase = 'idle' | 'starting' | 'listening' | 'finishing' | 'tidying';
 
-/** How long Undo stays after the words were written out again. */
-export const UNDO_TIDY_MS = 8_000;
+/**
+ * One dictation as it's heard, for the listening line: read on its own
+ * clock by DictationLive, never through React state.
+ */
+export interface DictationMeter {
+  startedAt: number;
+  /** When a voice was last heard (a level at or over VOICE_LEVEL). */
+  lastVoiceAt: number | null;
+  /** When the live recogniser last gave words (macOS). */
+  lastWordsAt: number | null;
+  wordsExpected: boolean;
+  /** The microphone listening, by name, when the computer said. */
+  mic: string | null;
+  listeners: Set<(level: number) => void>;
+}
 
-/** The words before the better ones replaced them, while Undo is offered. */
-export interface TidyUndo {
-  /** The whole draft to put back. */
-  before: string;
-  /** The draft as the better words left it (Undo only while it still is). */
-  after: string;
+export function newDictationMeter(now = Date.now()): DictationMeter {
+  return {
+    startedAt: now,
+    lastVoiceAt: null,
+    lastWordsAt: null,
+    wordsExpected: isMac(),
+    mic: null,
+    listeners: new Set(),
+  };
 }
 
 interface Options {
@@ -88,19 +113,24 @@ export function useDictation({
   const sessionRef = useRef<number | null>(null);
   /** The draft as typed before dictation began; cancel puts it back. */
   const originalRef = useRef('');
-  /** The draft plus every finished segment; partials are appended to it. */
+  /** Every finished segment's live words; partials are appended to it. */
   const baseRef = useRef('');
   /** A stop or cancel asked for before the session id came back. */
   const pendingRef = useRef<'stop' | 'cancel' | null>(null);
   const holdingRef = useRef(false);
   /** Send once this dictation has ended (Enter or Send while listening). */
   const sendAfterRef = useRef<(() => void) | null>(null);
-  /** The draft the live words last left, so better words replace only those. */
-  const shownRef = useRef('');
-  const [undo, setUndo] = useState<TidyUndo | null>(null);
   /** The draft as the last dictation left it, until it's sent (to learn your fixes). */
   const dictatedRef = useRef<string | null>(null);
   const [preparing, setPreparing] = useState<number | null>(null);
+  /** The live recogniser's words, never shown: the fallback if writing out can't happen. */
+  const liveRef = useRef('');
+  const gotWordsRef = useRef(false);
+  const unwrittenRef = useRef(false);
+  const [meter, setMeter] = useState<DictationMeter>(newDictationMeter);
+  const meterRef2 = useRef<DictationMeter>(meter);
+  /** Heard but not written out: the recording waits on the computer for Try again. */
+  const [failed, setFailed] = useState<number | null>(null);
 
   /** Sent while the words were still coming: they live here, not in the field, until they go. */
   const heldRef = useRef<string | null>(null);
@@ -124,7 +154,12 @@ export function useDictation({
   }, []);
 
   const setLevel = useCallback(
-    (level: number) => meterRef.current?.style.setProperty('--dictation-level', String(level)),
+    (level: number) => {
+      meterRef.current?.style.setProperty('--dictation-level', String(level));
+      const m = meterRef2.current;
+      if (level >= VOICE_LEVEL) m.lastVoiceAt = Date.now();
+      for (const listen of m.listeners) listen(level);
+    },
     [meterRef]
   );
 
@@ -134,35 +169,29 @@ export function useDictation({
     void onDictationEvent((event) => {
       if (event.session !== sessionRef.current) return;
       switch (event.kind) {
+        // Live words are kept, not shown: you see them once they're written out.
         case 'partial':
-          shownRef.current = joinDictation(baseRef.current, event.text);
-          setDraft(shownRef.current);
+          liveRef.current = joinDictation(baseRef.current, event.text);
+          if (event.text.trim()) meterRef2.current.lastWordsAt = Date.now();
           break;
         case 'final':
           // A long dictation arrives as several segments; each final one
           // becomes part of what the next is appended to.
           baseRef.current = joinDictation(baseRef.current, event.text);
-          shownRef.current = baseRef.current;
-          setDraft(baseRef.current);
+          liveRef.current = baseRef.current;
+          if (event.text.trim()) meterRef2.current.lastWordsAt = Date.now();
           break;
         case 'improving':
           setLevel(0);
           setPhase('tidying');
           break;
-        case 'improved': {
-          // Only over what the live words left: never over your own typing.
-          const now = getDraft();
-          if (now !== shownRef.current) break;
-          const after = joinDictation(originalRef.current, event.text);
-          if (after === now) break;
-          setDraft(after);
-          // Undo puts back the live words, or Whisper's own when there were none.
-          const before =
-            now === originalRef.current ? joinDictation(originalRef.current, event.raw) : now;
-          // Going straight out (Enter while listening): nothing to undo.
-          if (before !== after && !sendAfterRef.current) setUndo({ before, after });
+        case 'improved':
+          gotWordsRef.current = true;
+          setDraft(joinDictation(originalRef.current, event.text));
           break;
-        }
+        case 'unwritten':
+          unwrittenRef.current = true;
+          break;
         case 'level':
           setLevel(event.level);
           break;
@@ -178,6 +207,22 @@ export function useDictation({
             setField(originalRef.current);
             sendAfterRef.current = null;
           } else {
+            if (!gotWordsRef.current) {
+              // Not written out: the live words if there were any; else, if it
+              // heard you, the recording waits for Try again.
+              const live = liveRef.current.trim();
+              if (live) setDraft(joinDictation(originalRef.current, live));
+              else if (unwrittenRef.current) {
+                setFailed(event.session);
+                if (heldRef.current !== null) {
+                  // Nothing to send after all: the field is the field again.
+                  setField(heldRef.current);
+                  heldRef.current = null;
+                  setHeld(null);
+                  sendAfterRef.current = null;
+                }
+              }
+            }
             dictatedRef.current = getDraft();
           }
           sessionRef.current = null;
@@ -215,15 +260,10 @@ export function useDictation({
     setField(words);
     send();
     setField(typed);
-    setHeld(null); // eslint-disable-line react-hooks/set-state-in-effect -- the held message gives way to the sent one in the same render
+    // The held message gives way to the sent one in the same render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHeld(null);
   }, [phase, getField, setField]);
-
-  // Undo goes after a few seconds, or as soon as the draft is changed.
-  useEffect(() => {
-    if (!undo) return;
-    const t = setTimeout(() => setUndo(null), UNDO_TIDY_MS);
-    return () => clearTimeout(t);
-  }, [undo]);
 
   // Windows and Linux wait for the speech model the first time: say how far.
   useEffect(() => {
@@ -247,14 +287,6 @@ export function useDictation({
       unlisten?.();
     };
   }, [blocked]);
-
-  const undoTidy = useCallback(() => {
-    if (undo && getDraft() === undo.after) {
-      setDraft(undo.before);
-      dictatedRef.current = undo.before;
-    }
-    setUndo(null);
-  }, [undo, getDraft, setDraft]);
 
   /**
    * The message is going: if you fixed a dictated word in it first, the
@@ -293,10 +325,12 @@ export function useDictation({
     stopDictation(session).catch((error) => {
       if (sessionRef.current !== session) return;
       sessionRef.current = null;
+      // What the live recogniser heard is better than nothing.
+      if (liveRef.current.trim()) setDraft(joinDictation(originalRef.current, liveRef.current));
       setPhase('idle');
       showToast(formatCommandError(asCommandError(error)), 'error');
     });
-  }, [setLevel, setPhase, showToast]);
+  }, [setDraft, setLevel, setPhase, showToast]);
 
   const cancel = useCallback(() => {
     // Already sent (held for its better words): nothing to cancel.
@@ -315,11 +349,19 @@ export function useDictation({
 
   const start = useCallback(async () => {
     if (!enabled || phaseRef.current !== 'idle') return;
-    originalRef.current = baseRef.current = shownRef.current = getDraft();
+    originalRef.current = getDraft();
+    baseRef.current = '';
+    liveRef.current = '';
+    gotWordsRef.current = false;
+    unwrittenRef.current = false;
+    setFailed(null);
+    const fresh = newDictationMeter();
+    fresh.listeners = meterRef2.current.listeners;
+    meterRef2.current = fresh;
+    setMeter(fresh);
     pendingRef.current = null;
     sendAfterRef.current = null;
     setBlocked(null);
-    setUndo(null);
     setPhase('starting');
     try {
       const vocabulary = await getVocabulary().catch(() => []);
@@ -330,6 +372,8 @@ export function useDictation({
         return;
       }
       sessionRef.current = result.session;
+      meterRef2.current.mic = result.mic ?? null;
+      meterRef2.current.startedAt = Date.now();
       setPhase('listening');
       const pending = pendingRef.current;
       pendingRef.current = null;
@@ -356,6 +400,25 @@ export function useDictation({
     },
     [stop, holdOnSend, getField, setField]
   );
+
+  /** Try again on a recording that couldn't be written out. */
+  const retry = useCallback(() => {
+    const session = failed;
+    if (session === null || phaseRef.current !== 'idle') return;
+    setFailed(null);
+    originalRef.current = getDraft();
+    liveRef.current = '';
+    gotWordsRef.current = false;
+    unwrittenRef.current = false;
+    sessionRef.current = session;
+    setPhase('tidying');
+    retryDictation(session).catch((error) => {
+      if (sessionRef.current !== session) return;
+      sessionRef.current = null;
+      setPhase('idle');
+      showToast(formatCommandError(asCommandError(error)), 'error');
+    });
+  }, [failed, getDraft, setPhase, showToast]);
 
   const toggle = useCallback(() => {
     if (phaseRef.current === 'idle') void start();
@@ -449,8 +512,11 @@ export function useDictation({
     /** The words of a message sent before they were all in (`holdOnSend`): show it as on its way. */
     held,
     onComposerKeyDown,
-    /** Offered for a few seconds after better words replaced the live ones. */
-    undo: undo ? undoTidy : null,
+    /** This dictation as it's heard: the wave, the time, "Can't hear you". */
+    meter,
+    /** Heard but couldn't be written out: Try again (null when not). */
+    retry: failed !== null ? retry : null,
+    dismissFailed: () => setFailed(null),
     /** Call with a message as it's sent: learns the fixes you made to dictated words. */
     noteSent,
   };

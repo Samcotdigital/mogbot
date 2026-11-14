@@ -874,7 +874,7 @@ export const AgentChat = memo(function AgentChat({
     // you've just sent, which it will read next.
     const draft = streaming && !list.some((m) => m.id === streaming.id) ? [streaming] : [];
     // Sent while dictation still tidies it: here at once, dimmed, until it goes.
-    if (held?.trim())
+    if (held !== null)
       local.push({ id: HELD_ID, agentId: agent.id, ts: Date.now(), kind: 'user', text: held });
     return { shown: [...list, ...draft, ...local], aliases, failed, sending };
   }, [messages, pending, agent.id, streaming, held]);

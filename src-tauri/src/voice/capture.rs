@@ -17,7 +17,35 @@ pub struct Recording {
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
+/// The recording as it's heard, at 16 kHz, for writing ahead.
+pub struct Heard {
+    samples: Arc<Mutex<Vec<f32>>>,
+    rate: u32,
+}
+
+impl super::ahead::Source for Heard {
+    fn len(&self) -> usize {
+        let native = self.samples.lock().map(|v| v.len()).unwrap_or(0);
+        (native as u64 * super::pcm::RATE as u64 / self.rate.max(1) as u64) as usize
+    }
+    fn read(&self, from: usize, to: usize) -> Vec<f32> {
+        let at = |i: usize| (i as u64 * self.rate as u64 / super::pcm::RATE as u64) as usize;
+        let Ok(v) = self.samples.lock() else {
+            return Vec::new();
+        };
+        let (a, b) = (at(from).min(v.len()), at(to).min(v.len()));
+        super::pcm::to_16k(&v[a..b], self.rate)
+    }
+}
+
 impl Recording {
+    pub fn heard(&self) -> Heard {
+        Heard {
+            samples: Arc::clone(&self.samples),
+            rate: self.rate,
+        }
+    }
+
     /// Stop the microphone and take what was heard, as 16 kHz mono.
     pub fn finish(mut self) -> Vec<f32> {
         self.halt();

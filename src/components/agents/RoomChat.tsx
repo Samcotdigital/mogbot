@@ -873,14 +873,15 @@ function RoomComposer({
             title="Attach files, or paste or drop them here"
           />
         )}
-        {(dictating || dictation.undo) && (
+        {(dictating || dictation.retry) && (
           <ListeningStatus
             phase={dictation.phase}
+            meter={dictation.meter}
             onCancel={dictation.cancel}
-            onUndo={dictation.undo}
+            onRetry={dictation.retry}
           />
         )}
-        {!dictating && !dictation.undo && (
+        {!dictating && !dictation.retry && (
           <span className="agent-composer__hint agent-room__address" aria-live="polite">
             {toLine ??
               (canSend && to.kind === 'ask' && !asking && !mentionPicker.showing

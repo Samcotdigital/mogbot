@@ -847,11 +847,14 @@ const scrollTablesSideways = async (page) => {
       speed: 1200,
     });
     await sleep(500);
-    const after = await page.eval(`(() => ({ x: ${SIDEWAYS}[${i}].scrollLeft, top: window.__qaScroller ? window.__qaScroller.scrollTop : 0 }))()`);
+    const after = await page.eval(
+      `(() => ({ x: ${SIDEWAYS}[${i}].scrollLeft, top: window.__qaScroller ? window.__qaScroller.scrollTop : 0 }))()`
+    );
     seen.push({ width: [w.sw, w.cw], scrollLeft: after.x, chatMoved: after.top !== top });
   }
   log('tables', JSON.stringify(seen));
-  if (seen.some((t) => !(t.scrollLeft > 0))) throw new Error(`a wide table didn't scroll sideways: ${JSON.stringify(seen)}`);
+  if (seen.some((t) => !(t.scrollLeft > 0)))
+    throw new Error(`a wide table didn't scroll sideways: ${JSON.stringify(seen)}`);
 };
 
 /** Long-press the message whose words start with `start`, as a finger held on it. */
@@ -1554,7 +1557,7 @@ const LIVE = [
       await sleep(2300);
     },
     check:
-      'Listening: × in the +’s place, words streaming (the last lighter), the waveform and 0:0x, then Stop and Send (accent); no mic',
+      'Listening: no words, the card’s top line “● Listening · 0:0x”; × in the +’s place, the waveform, then Stop and Send (accent); no mic',
     after: async (page) => {
       await page.clickLabel('Cancel dictation').catch(() => {});
       await sleep(600);
@@ -1588,7 +1591,7 @@ const LIVE = [
       await sleep(250);
     },
     check:
-      'Stopped, the computer writing it out again: the card stays with the words, “Tidying…” over the field, × and Send; Stop dimmed',
+      'Stopped, the computer writing it out: the card stays with “● Tidying…” where the words would be (no words yet), × and Send; Stop dimmed',
     after: async (page) => {
       await page.clickLabel('Cancel dictation').catch(() => {});
       await sleep(600);
@@ -1606,7 +1609,7 @@ const LIVE = [
       await sleep(1500);
     },
     check:
-      'Mid-swap: the words where they were, the changed ones (the comma gone, “send it to me first?”) faintly highlighted; the rest unchanged; no caret',
+      'Still tidying or just in: the card says Tidying…, or the written-out words have appeared in the field; never the rough live words',
     after: async (page) => {
       await page.clickLabel('Send').catch(() => {});
       await sleep(800);
@@ -1623,7 +1626,7 @@ const LIVE = [
       await sleep(2500);
     },
     check:
-      'The better words in the field (“…for Thursday and send it to me first?”, no comma), “Tidied the names and words” with Undo over it',
+      'The written-out words in the field (“…for Thursday and send it to me first?”, no comma), editable; no Undo line',
     after: async (page) => {
       await page.clickLabel('Send').catch(() => {});
       await sleep(800);
@@ -1639,7 +1642,7 @@ const LIVE = [
       await sleep(5200);
     },
     check:
-      'A long dictation while listening: the waveform and 0:0x in a slim row over the field; the words use the full width beside Stop and Send, wrapping like typed text, six lines then scrolled to the newest',
+      'A long dictation while listening: still no words, only “● Listening · 0:0x” and the waveform beside Stop and Send',
     after: async (page) => {
       await page.clickLabel('Cancel dictation').catch(() => {});
       await page.eval(`globalThis.__qaDictation = {}`);

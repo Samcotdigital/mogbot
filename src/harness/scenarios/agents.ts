@@ -1186,7 +1186,12 @@ export const messagesFor = (args: Record<string, unknown>) => {
   return sent;
 };
 
-/** Dictation mid-sentence: a partial in the draft, the meter at a speaking level. */
+/** A voice's levels over a few seconds, for the wave. */
+const VOICE = Array.from({ length: 120 }, (_, i) =>
+  Math.max(0, 0.45 + 0.4 * Math.sin(i * 0.7) * Math.sin(i * 0.13) + 0.1 * Math.cos(i * 2.3))
+);
+
+/** Dictation mid-sentence: words heard (not shown), a voice coming in. */
 const startListening = () => {
   setTimeout(() => {
     void emit('dictation://event', {
@@ -1194,7 +1199,26 @@ const startListening = () => {
       session: 1,
       text: 'Can you ask Finance to send the Northwind reminder',
     });
-    void emit('dictation://event', { kind: 'level', session: 1, level: 0.55 });
+    for (const level of VOICE) void emit('dictation://event', { kind: 'level', session: 1, level });
+  }, 50);
+  return { status: 'listening', session: 1, mic: 'MacBook Pro Microphone' };
+};
+
+/** The mic is on but hears nothing: flat, then "Can't hear you". */
+const startSilent = () => {
+  setTimeout(() => {
+    for (let i = 0; i < 60; i++)
+      void emit('dictation://event', { kind: 'level', session: 1, level: 0 });
+  }, 50);
+  return { status: 'listening', session: 1, mic: 'MacBook Pro Microphone' };
+};
+
+/** Heard, but it couldn't be written out: kept for Try again. */
+const startThenUnwritten = () => {
+  setTimeout(() => {
+    void emit('dictation://event', { kind: 'improving', session: 1 });
+    void emit('dictation://event', { kind: 'unwritten', session: 1 });
+    void emit('dictation://event', { kind: 'ended', session: 1, cancelled: false });
   }, 50);
   return { status: 'listening', session: 1 };
 };
@@ -3695,7 +3719,7 @@ export const agentsScenarios: Scenario[] = [
     id: 'agents-dictating',
     title: 'Agents — dictating into the composer',
     looksRightWhen:
-      'The words arriving sit in the composer in the full text colour, never mistakable for the placeholder. The mic is green with a green halo sized by the voice level; the composer border is tinted green; the paperclip stays put, and a small row under the text, at its left edge, has a pulsing dot saying Listening with a Cancel beside it. Nothing reads as an error, and Send is unchanged.',
+      'No words show while you talk. The row under the field reads ● Listening · 0:00 at its left, then your voice as a wave of thin bars filling the width (newest at the right), then Cancel. The mic is lit and the composer border tinted; the paperclip stays put. Nothing reads as an error, and Send is unchanged.',
     // Steps run before a palette command, so walk in through the sidebar.
     openSelector: AGENTS_TAB,
     requires: '.agent-composer[data-dictation="listening"]',
@@ -3713,7 +3737,7 @@ export const agentsScenarios: Scenario[] = [
     id: 'agents-dictating-long',
     title: 'Agents — a long dictation after typed text',
     looksRightWhen:
-      'The composer reads like typing: “Quick one:” (typed first) then the spoken sentences, starting at the same left edge and the same size as typed text, the full width of the field, wrapping evenly. The paperclip stays where it is. A small row under the text, at the text’s left edge, says ● Listening · Cancel; it takes no width from the text. The field grows to its cap and shows the newest words.',
+      'Only “Quick one:” (typed first) shows in the field; the spoken sentences do not appear while listening. Under it the listening row: ● Listening · time, the wave, Cancel.',
     openSelector: AGENTS_TAB,
     requires: '.agent-composer[data-dictation="listening"]',
     clipSelector: '.agent-chat__footer',
@@ -3734,7 +3758,7 @@ export const agentsScenarios: Scenario[] = [
     id: 'agents-dictation-tidying',
     title: 'Agents — dictation being written out again',
     looksRightWhen:
-      'The heard words sit in the composer (read-only); the small row under the text says ● Tidying… · Cancel. The mic and Send are off until it is done. Nothing reads as an error.',
+      'The field is empty (no live words); the row under it says ● Tidying…, the wave held and dimmed, then Cancel. The mic and Send are off until it is done. Nothing reads as an error.',
     openSelector: AGENTS_TAB,
     requires: '.agent-composer[data-dictation="tidying"]',
     clipSelector: '.agent-chat__footer',
@@ -3752,7 +3776,7 @@ export const agentsScenarios: Scenario[] = [
     id: 'agents-dictation-held',
     title: 'Agents — sent while dictation is still tidying',
     looksRightWhen:
-      'Enter while dictating: the message is already in the chat as your bubble, dimmed, with “Tidying…” under it. The composer under it is empty and ordinary (no Tidying row), ready for the next message.',
+      'Enter while dictating: the message is already in the chat as your bubble, dimmed, holding a small wave of bars (no words yet), with “Tidying…” under it. The composer under it is empty and ordinary (no Tidying row), ready for the next message.',
     openSelector: AGENTS_TAB,
     requires: '.agent-chat__row--user[data-sending]',
     steps: [
@@ -3771,11 +3795,12 @@ export const agentsScenarios: Scenario[] = [
   },
   {
     id: 'agents-dictation-tidied',
-    title: 'Agents — dictation tidied, with Undo',
+    title: 'Agents — dictation written out',
     looksRightWhen:
-      'The composer holds “Tell the Lobeva Site agent the pictures are fixed.” (the name corrected), editable, Send on. The small row under the text says Tidied the names and words · Undo, with no dot.',
+      'The composer holds “Tell the Lobeva Site agent the pictures are fixed.” (the name corrected), editable, Send on. No row under it.',
     openSelector: AGENTS_TAB,
-    requires: '.agent-composer__listening[data-tidied]',
+    requires:
+      '.agent-composer[data-dictation="idle"] .agent-composer__input:not(:placeholder-shown)',
     clipSelector: '.agent-chat__footer',
     steps: [{ click: '.agent-composer__mic' }],
     mockEvents: true,
@@ -3785,6 +3810,43 @@ export const agentsScenarios: Scenario[] = [
       start_dictation: startThenTidied,
       cancel_dictation: null,
       stop_dictation: null,
+    },
+  },
+  {
+    id: 'agents-dictation-silent',
+    title: 'Agents — dictating, but the mic hears nothing',
+    looksRightWhen:
+      'After three seconds of nothing, the row under the field says “Can’t hear you · check the mic (MacBook Pro Microphone)” in the warning colour, its dot steady; the wave beside it is flat and dim. Cancel stays.',
+    openSelector: AGENTS_TAB,
+    requires: '.agent-composer__listening-clock[data-hearing="silent"]',
+    clipSelector: '.agent-chat__footer',
+    steps: [{ click: '.agent-composer__mic' }, { wait: 3_600 }],
+    mockEvents: true,
+    commands: {
+      agents_overview: overview(),
+      agents_messages: messagesFor,
+      start_dictation: startSilent,
+      cancel_dictation: null,
+      stop_dictation: null,
+    },
+  },
+  {
+    id: 'agents-dictation-unwritten',
+    title: 'Agents — heard, but it could not be written out',
+    looksRightWhen:
+      'The field is as it was; the row under it says “Couldn’t write that out · Try again” in the warning colour, Try again a text button.',
+    openSelector: AGENTS_TAB,
+    requires: '.agent-composer__listening[data-failed]',
+    clipSelector: '.agent-chat__footer',
+    steps: [{ click: '.agent-composer__mic' }],
+    mockEvents: true,
+    commands: {
+      agents_overview: overview(),
+      agents_messages: messagesFor,
+      start_dictation: startThenUnwritten,
+      cancel_dictation: null,
+      stop_dictation: null,
+      retry_dictation: null,
     },
   },
   {

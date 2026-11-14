@@ -212,6 +212,11 @@ async function runSteps(list?: ScenarioStep[]): Promise<void> {
   ];
 
   for (const step of steps) {
+    if (step.wait) {
+      await new Promise((r) => setTimeout(r, step.wait));
+      stepLog.push(`waited ${step.wait}ms`);
+      continue;
+    }
     if (step.key) {
       const parts = step.key.split('+');
       const key = parts[parts.length - 1];

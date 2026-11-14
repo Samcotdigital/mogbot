@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRef } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { AgentComposer, LiveSecretHint } from './AgentComposer';
+import { newDictationMeter } from './useDictation';
 import { composerDraft, setComposerDraft } from '../../lib/composerDraft';
 import { resetChatRestoreForTests, unsentDraft } from '../../lib/chatRestore';
 import { QUEUE_HINT_LEARNED_AFTER } from '../../lib/queueHint';
@@ -12,7 +13,8 @@ const dictation = {
   cancel: () => {},
   onComposerKeyDown: () => false,
   stopAndSend: (send: () => void) => send(),
-  undo: null,
+  meter: newDictationMeter(),
+  retry: null,
 };
 
 function Chat({

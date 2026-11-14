@@ -6,6 +6,7 @@ let emit: (event: DictationEvent) => void = () => {};
 const start = vi.fn<(vocabulary: string[]) => Promise<DictationStart>>();
 const stop = vi.fn((_session: number) => Promise.resolve());
 const cancel = vi.fn((_session: number) => Promise.resolve());
+const retry = vi.fn((_session: number) => Promise.resolve());
 const learn = vi.fn((_dictated: string, _sent: string) => Promise.resolve<string[]>([]));
 
 vi.mock('../../lib/dictation', async (importOriginal) => ({
@@ -13,6 +14,7 @@ vi.mock('../../lib/dictation', async (importOriginal) => ({
   startDictation: (vocabulary: string[]) => start(vocabulary),
   stopDictation: (s: number) => stop(s),
   cancelDictation: (s: number) => cancel(s),
+  retryDictation: (s: number) => retry(s),
   learnFromDictation: (d: string, t: string) => learn(d, t),
   onDictationEvent: (handler: (event: DictationEvent) => void) => {
     emit = handler;
@@ -52,7 +54,7 @@ describe('useDictation', () => {
     start.mockResolvedValue({ status: 'listening', session: 7 });
   });
 
-  it('writes partials after the existing draft and keeps the final text on stop', async () => {
+  it('shows no live words; the written-out words arrive after what was typed', async () => {
     const { hook, draft } = setup();
     await act(async () => {
       hook.result.current.toggle();
@@ -62,35 +64,65 @@ describe('useDictation', () => {
     expect(hook.result.current.phase).toBe('listening');
 
     act(() => emit({ kind: 'partial', session: 7, text: 'call' }));
-    expect(draft()).toBe('Hi call');
-    act(() => emit({ kind: 'partial', session: 99, text: 'stale' }));
-    expect(draft()).toBe('Hi call');
+    expect(draft()).toBe('Hi');
 
     act(() => hook.result.current.toggle());
     expect(stop).toHaveBeenCalledWith(7);
     expect(hook.result.current.phase).toBe('finishing');
-    act(() => emit({ kind: 'final', session: 7, text: 'call Finance' }));
+    act(() => emit({ kind: 'final', session: 7, text: 'call finance' }));
+    act(() => emit({ kind: 'improving', session: 7 }));
+    expect(draft()).toBe('Hi');
+    act(() =>
+      emit({
+        kind: 'improved',
+        session: 7,
+        text: 'Call Finance.',
+        raw: 'Call finance.',
+        tidied: true,
+      })
+    );
     act(() => emit({ kind: 'ended', session: 7, cancelled: false }));
-    expect(draft()).toBe('Hi call Finance');
+    expect(draft()).toBe('Hi Call Finance.');
     expect(hook.result.current.phase).toBe('idle');
   });
 
-  it('keeps appending across segments until the user stops', async () => {
+  it('with nothing written out, the live words across every segment are kept', async () => {
     const { hook, draft } = setup();
     await act(async () => {
       hook.result.current.toggle();
       await new Promise((r) => setTimeout(r, 0));
     });
     act(() => emit({ kind: 'final', session: 7, text: 'First part.' }));
-    expect(hook.result.current.phase).toBe('listening');
     act(() => emit({ kind: 'partial', session: 7, text: 'and more' }));
-    expect(draft()).toBe('Hi First part. and more');
     act(() => emit({ kind: 'final', session: 7, text: 'And more.' }));
-    expect(draft()).toBe('Hi First part. And more.');
-
-    // Cancel still restores what was typed, not the last segment.
-    act(() => hook.result.current.cancel());
     expect(draft()).toBe('Hi');
+    act(() => hook.result.current.toggle());
+    // No model yet: no improving, straight to ended.
+    act(() => emit({ kind: 'ended', session: 7, cancelled: false }));
+    expect(draft()).toBe('Hi First part. And more.');
+  });
+
+  it('heard but not written out: nothing in the field, Try again writes it out', async () => {
+    const { hook, draft } = setup('');
+    await act(async () => {
+      hook.result.current.toggle();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    act(() => hook.result.current.toggle());
+    act(() => emit({ kind: 'improving', session: 7 }));
+    act(() => emit({ kind: 'unwritten', session: 7 }));
+    act(() => emit({ kind: 'ended', session: 7, cancelled: false }));
+    expect(draft()).toBe('');
+    expect(hook.result.current.retry).not.toBeNull();
+    act(() => hook.result.current.retry?.());
+    expect(retry).toHaveBeenCalledWith(7);
+    expect(hook.result.current.phase).toBe('tidying');
+    expect(hook.result.current.retry).toBeNull();
+    act(() =>
+      emit({ kind: 'improved', session: 7, text: 'Ship it.', raw: 'Ship it.', tidied: false })
+    );
+    act(() => emit({ kind: 'ended', session: 7, cancelled: false }));
+    expect(draft()).toBe('Ship it.');
   });
 
   it('cancel puts the typed draft back', async () => {
@@ -126,7 +158,7 @@ describe('useDictation', () => {
     expect(preventDefault).toHaveBeenCalled();
     expect(stop).toHaveBeenCalledWith(7);
     expect(hook.result.current.phase).toBe('finishing');
-    expect(draft()).toBe('Hi ship it');
+    expect(draft()).toBe('Hi');
   });
 
   it('Enter with a send stops, waits for the tidied words, then sends', async () => {
@@ -180,9 +212,9 @@ describe('useDictation', () => {
         send
       );
     });
-    // Moved up: the field is empty, the message shows as held.
+    // Moved up: the field is empty, the message shows as held (no live words).
     expect(draft()).toBe('');
-    expect(hook.result.current.held).toBe('Hi tell mogbert');
+    expect(hook.result.current.held).toBe('Hi');
     act(() => emit({ kind: 'final', session: 7, text: 'tell mogbert' }));
     act(() => emit({ kind: 'improving', session: 7 }));
     act(() =>
@@ -205,42 +237,22 @@ describe('useDictation', () => {
     expect(hook.result.current.held).toBeNull();
   });
 
-  it('the tidied words replace the live ones, and Undo puts them back', async () => {
-    const { hook, draft } = setup();
+  it('held, then not written out: the message comes back to the field and nothing is sent', async () => {
+    const { hook, draft } = setup('Hi', true);
     await act(async () => {
       hook.result.current.toggle();
       await new Promise((r) => setTimeout(r, 0));
     });
-    act(() => emit({ kind: 'final', session: 7, text: 'ask labiva' }));
-    act(() => hook.result.current.toggle());
+    const send = vi.fn();
+    act(() => hook.result.current.stopAndSend(send));
+    expect(hook.result.current.held).toBe('Hi');
     act(() => emit({ kind: 'improving', session: 7 }));
-    act(() =>
-      emit({ kind: 'improved', session: 7, text: 'Ask Lobeva.', raw: 'Ask Labiva.', tidied: true })
-    );
+    act(() => emit({ kind: 'unwritten', session: 7 }));
     act(() => emit({ kind: 'ended', session: 7, cancelled: false }));
-    expect(draft()).toBe('Hi Ask Lobeva.');
-    expect(hook.result.current.undo).not.toBeNull();
-    act(() => hook.result.current.undo?.());
-    expect(draft()).toBe('Hi ask labiva');
-    expect(hook.result.current.undo).toBeNull();
-  });
-
-  it('never writes the tidied words over what you typed meanwhile', async () => {
-    const { hook, draft, type } = setup();
-    await act(async () => {
-      hook.result.current.toggle();
-      await new Promise((r) => setTimeout(r, 0));
-    });
-    act(() => emit({ kind: 'final', session: 7, text: 'ship it' }));
-    act(() => hook.result.current.toggle());
-    act(() => emit({ kind: 'improving', session: 7 }));
-    type('Something else entirely');
-    act(() =>
-      emit({ kind: 'improved', session: 7, text: 'Ship it.', raw: 'Ship it.', tidied: false })
-    );
-    act(() => emit({ kind: 'ended', session: 7, cancelled: false }));
-    expect(draft()).toBe('Something else entirely');
-    expect(hook.result.current.undo).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+    expect(hook.result.current.held).toBeNull();
+    expect(draft()).toBe('Hi');
+    expect(hook.result.current.retry).not.toBeNull();
   });
 
   it('Esc while tidying throws the dictation away', async () => {

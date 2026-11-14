@@ -72,8 +72,15 @@ pub enum DictationBlock {
 #[derive(Debug, Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
 pub enum DictationStart {
-    Listening { session: u64 },
-    Blocked { reason: DictationBlock },
+    Listening {
+        session: u64,
+        /// The microphone listening, by name, for "Can't hear you" (macOS).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        mic: Option<String>,
+    },
+    Blocked {
+        reason: DictationBlock,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,6 +118,11 @@ pub enum DictationEvent {
         raw: String,
         tidied: bool,
     },
+    /// It heard you but couldn't write it out: the recording is kept for
+    /// `retry_dictation`, until the next dictation starts. `ended` follows.
+    Unwritten {
+        session: u64,
+    },
     Ended {
         session: u64,
         cancelled: bool,
@@ -128,15 +140,34 @@ fn emit(app: &AppHandle, event: DictationEvent) {
 /// result is dropped.
 static IMPROVING: std::sync::Mutex<Vec<u64>> = std::sync::Mutex::new(Vec::new());
 
+/// A recording that couldn't be written out, for Try again.
+struct Kept {
+    session: u64,
+    samples: Vec<f32>,
+    names: Vec<String>,
+    context: Option<String>,
+}
+
+static KEPT: std::sync::Mutex<Option<Kept>> = std::sync::Mutex::new(None);
+
+/// A new dictation lets the last unwritten one go.
+pub(crate) fn forget_kept() {
+    if let Ok(mut kept) = KEPT.lock() {
+        *kept = None;
+    }
+}
+
 /// After the microphone stops: write the dictation out again with Whisper
 /// and the names pass, then end the session. With no model yet (it's
-/// fetched in the background) or too little sound, it just ends.
+/// fetched in the background) or too little sound, it just ends. `ahead`
+/// has written out the start of a long one already.
 pub(crate) fn finish_listening(
     app: &AppHandle,
     session: u64,
     samples_16k: Vec<f32>,
     names: Vec<String>,
     context: Option<String>,
+    ahead: Option<crate::voice::ahead::Ahead>,
 ) {
     let ended = move |app: &AppHandle| {
         emit(
@@ -160,7 +191,16 @@ pub(crate) fn finish_listening(
     emit(app, DictationEvent::Improving { session });
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let improved = crate::voice::improve(samples_16k, names, context).await;
+        let (said, rest, samples_16k) = match ahead {
+            Some(ahead) => tokio::task::spawn_blocking(move || {
+                let (said, rest) = ahead.finish(&samples_16k);
+                (said, rest, samples_16k)
+            })
+            .await
+            .unwrap_or_default(),
+            None => (String::new(), samples_16k.clone(), samples_16k),
+        };
+        let improved = crate::voice::improve_rest(said, rest, names.clone(), context.clone()).await;
         let still_wanted = IMPROVING
             .lock()
             .map(|mut list| {
@@ -172,8 +212,8 @@ pub(crate) fn finish_listening(
         if !still_wanted {
             return;
         }
-        if let Some(i) = improved {
-            emit(
+        match improved {
+            Some(i) => emit(
                 &app,
                 DictationEvent::Improved {
                     session,
@@ -181,10 +221,41 @@ pub(crate) fn finish_listening(
                     raw: i.raw,
                     tidied: i.tidied,
                 },
-            );
+            ),
+            None if !samples_16k.is_empty() => {
+                tracing::warn!(session, "[Dictation] heard but not written out; kept");
+                if let Ok(mut kept) = KEPT.lock() {
+                    *kept = Some(Kept {
+                        session,
+                        samples: samples_16k,
+                        names,
+                        context,
+                    });
+                }
+                emit(&app, DictationEvent::Unwritten { session });
+            }
+            None => {}
         }
         ended(&app);
     });
+}
+
+/// Try again on a recording that couldn't be written out: the same
+/// `improving`, `improved` or `unwritten`, then `ended`, for the same session.
+#[tauri::command]
+#[tracing::instrument(skip(app))]
+pub fn retry_dictation(app: AppHandle, session: u64) -> Result<(), CommandError> {
+    let kept = KEPT
+        .lock()
+        .ok()
+        .and_then(|mut k| k.take_if(|k| k.session == session));
+    let Some(kept) = kept else {
+        return Err(CommandError::expected(
+            "That recording is gone. Dictate it again.",
+        ));
+    };
+    finish_listening(&app, session, kept.samples, kept.names, kept.context, None);
+    Ok(())
 }
 
 /// Cancel a session that is being written out again. True if it was.
@@ -261,6 +332,7 @@ pub async fn start_dictation(
 ) -> Result<DictationStart, CommandError> {
     // The better words need the model: fetched once, in the background.
     crate::voice::model::ensure(&app);
+    forget_kept();
     // Load Whisper while you talk, so the better words come sooner.
     crate::voice::warm_up();
     // Your words lead Apple's live words too (the better pass adds them itself).
@@ -336,6 +408,7 @@ mod other {
     struct Session {
         id: u64,
         recording: crate::voice::capture::Recording,
+        ahead: crate::voice::ahead::Ahead,
         names: Vec<String>,
         context: Option<String>,
     }
@@ -358,10 +431,12 @@ mod other {
             emit(&level_app, DictationEvent::Level { session: id, level })
         })
         .map_err(CommandError::expected)?;
+        let ahead = crate::voice::ahead::Ahead::start(recording.heard(), names.clone());
         let old = SESSION.lock().ok().and_then(|mut s| {
             s.replace(Session {
                 id,
                 recording,
+                ahead,
                 names,
                 context,
             })
@@ -377,7 +452,10 @@ mod other {
             );
         }
         tracing::info!(session = id, "[Dictation] listening");
-        Ok(DictationStart::Listening { session: id })
+        Ok(DictationStart::Listening {
+            session: id,
+            mic: None,
+        })
     }
 
     fn take(session: u64) -> Option<Session> {
@@ -395,12 +473,13 @@ mod other {
         };
         let Session {
             recording,
+            ahead,
             names,
             context,
             ..
         } = current;
         let samples = recording.finish();
-        finish_listening(&app, session, samples, names, context);
+        finish_listening(&app, session, samples, names, context, Some(ahead));
         Ok(())
     }
 
@@ -484,6 +563,8 @@ mod macos {
         observer: Option<Retained<AnyObject>>,
         /// Everything heard, 16 kHz mono, for Whisper when it stops.
         recording: Recording,
+        /// Long ones written out while they're spoken.
+        ahead: Option<crate::voice::ahead::Ahead>,
         /// The conversation, for the names pass.
         context: Option<String>,
     }
@@ -706,8 +787,8 @@ mod macos {
             return blocked(DictationBlock::SpeechRecognition);
         }
 
-        let (tx, rx) = oneshot::channel::<Result<u64, String>>();
-        let tx: Reply<Result<u64, String>> = Arc::new(Mutex::new(Some(tx)));
+        let (tx, rx) = oneshot::channel::<Result<(u64, Option<String>), String>>();
+        let tx: Reply<Result<(u64, Option<String>), String>> = Arc::new(Mutex::new(Some(tx)));
         let panic_tx = Arc::clone(&tx);
         let main_app = app.clone();
         app.run_on_main_thread(move || {
@@ -719,7 +800,7 @@ mod macos {
         drop(tx);
 
         match rx.await {
-            Ok(Ok(session)) => Ok(DictationStart::Listening { session }),
+            Ok(Ok((session, mic))) => Ok(DictationStart::Listening { session, mic }),
             Ok(Err(message)) => Err(CommandError::expected(message)),
             Err(_) => Err(CommandError::from("Dictation didn't start")),
         }
@@ -791,7 +872,7 @@ mod macos {
         app: &AppHandle,
         contextual: &[String],
         context: Option<String>,
-    ) -> Result<u64, String> {
+    ) -> Result<(u64, Option<String>), String> {
         // One session at a time: a new start replaces any old one.
         if let Some(old) = SESSION.with(|s| s.borrow_mut().take()) {
             teardown(app, old, End::Cancelled);
@@ -819,8 +900,10 @@ mod macos {
             if input.is_null() {
                 return Err("No microphone found.".into());
             }
-            choose_microphone(input);
+            let mic = choose_microphone(input);
             let recording: Recording = Arc::new(Mutex::new(Vec::new()));
+            let ahead =
+                crate::voice::ahead::Ahead::start(Arc::clone(&recording), contextual.to_vec());
             let sample_rate = start_capture(app, &engine, &slot, &recording, id)?;
             tracing::info!(session = id, sample_rate, "[Dictation] listening");
             let observer = watch_route_changes(app, &engine, id);
@@ -846,21 +929,22 @@ mod macos {
                     capturing: true,
                     observer,
                     recording,
+                    ahead: Some(ahead),
                     context,
                 })
             });
+            Ok((id, mic))
         }
-        Ok(id)
     }
 
     /// Main thread. Point the engine's input at the microphone dictation
     /// should use (`dictation_mic`): the built-in mic instead of a Bluetooth
     /// headset's, so music doesn't drop to call quality and capture isn't cut
     /// off by the headset switching profiles.
-    unsafe fn choose_microphone(input: *mut AnyObject) {
+    unsafe fn choose_microphone(input: *mut AnyObject) -> Option<String> {
         let Some(choice) = crate::commands::dictation_mic::core_audio::pick() else {
             tracing::warn!("[Dictation] no default microphone");
-            return;
+            return None;
         };
         if let Some(device) = choice.device {
             let unit: *mut std::ffi::c_void = msg_send![input, audioUnit];
@@ -874,6 +958,7 @@ mod macos {
         } else {
             tracing::info!(mic = %choice.name, transport = ?choice.transport, "[Dictation] microphone");
         }
+        Some(choice.name).filter(|n| !n.trim().is_empty())
     }
 
     /// Main thread. Install the tap on the input's current format and start
@@ -1190,6 +1275,7 @@ mod macos {
             heard,
             std::mem::take(&mut session.contextual),
             session.context.take(),
+            session.ahead.take(),
         );
     }
 

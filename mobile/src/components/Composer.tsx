@@ -53,6 +53,7 @@
 import {
   MAC_FEATURES,
   MAX_ATTACHMENTS,
+  VOICE_LEVEL,
   type Agent,
   type AgentRef,
 } from '@shipstudio/companion-protocol';
@@ -113,9 +114,9 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import type { ComposerDraft } from '../lib/drafts';
-import { MORPH_MS } from '../lib/wordMorph';
 import { LiveWords, type WordMorph } from './LiveWords';
 import { Waveform } from './Waveform';
+import { ListeningLine, newListeningMeter, type ListeningMeter } from './ListeningLine';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAccent } from '../lib/accent';
 import { needsYou } from '../lib/agents';
@@ -272,8 +273,11 @@ export function Composer({
     () => heldSend.current?.draft.text ?? getApp().composer[agent.id]?.text ?? '',
     [agent.id]
   );
+  /** What it hears, for the listening line (never through React state). */
+  const heard = useRef<ListeningMeter>(newListeningMeter());
   const putSpoken = useCallback(
     (text: string) => {
+      if (text.trim()) heard.current.lastWordsAt = Date.now();
       const h = heldSend.current;
       if (h) {
         h.draft = { ...h.draft, text };
@@ -287,7 +291,13 @@ export function Composer({
   );
   // The voice's level, 0..1, straight to the UI thread: the waveform reads it there.
   const level = useSharedValue(0);
-  const onLevel = useCallback((l: number) => level.set(l), [level]);
+  const onLevel = useCallback(
+    (l: number) => {
+      level.set(l);
+      if (l >= VOICE_LEVEL) heard.current.lastVoiceAt = Date.now();
+    },
+    [level]
+  );
   // The computer writes each dictation out again when it can: better names and words.
   const canTidy = useServed('dictation.transcribe', MAC_FEATURES.dictation);
   const improve = useMemo(
@@ -314,25 +324,13 @@ export function Composer({
   }, [tidying]);
   /** The field is the dictation card: listening, or tidying what it heard. */
   const listening = !holding && (dictation.phase !== 'idle' || (tidying && !editingTidy));
-  // The better words arriving: the field shows the swap for a moment (only
-  // the changed words move), then it's the editable text again.
+  // No live words show, so there's no swap to show either: they just appear.
   const [morph, setMorph] = useState<WordMorph | null>(null);
-  const wasTidying = useRef(false);
-  const tidiedTo = dictation.undo?.after;
+  // A new dictation: its own clock and hearing.
+  const listeningNow = dictation.phase === 'listening';
   useEffect(() => {
-    const was = wasTidying.current;
-    wasTidying.current = tidying;
-    const undo = dictation.undo;
-    if (!was || tidying || !undo || editingTidy || getDraft() !== undo.after) return;
-    const swap = { from: undo.before, to: undo.after, at: Date.now() };
-    const show = setTimeout(() => setMorph(swap), 0);
-    const done = setTimeout(() => setMorph((m) => (m === swap ? null : m)), MORPH_MS);
-    return () => {
-      clearTimeout(show);
-      clearTimeout(done);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- on the tidy ending only
-  }, [tidying, tidiedTo]);
+    if (listeningNow) heard.current = newListeningMeter();
+  }, [listeningNow]);
   const morphing = !!morph && !listening && draft.text === morph.to;
   /** A voice message: the mic is held (or was, and its last words are landing). */
   const held = listening && dictation.state.held;
@@ -456,9 +454,8 @@ export function Composer({
       : !listening && problem?.fix === 'retry'
         ? 'Try again'
         : null;
-  // The better words came in: Undo, while the draft is still what they left.
-  const undo =
-    !listening && dictation.undo && draft.text === dictation.undo.after ? dictation.undo : null;
+  // No Undo: the words you saw are the written-out ones; there's nothing earlier to go back to.
+  const undo: typeof dictation.undo = null;
   const undoTidy = () => {
     haptic.select();
     dictation.undoTidy();
@@ -894,9 +891,13 @@ export function Composer({
           dictation={
             listening
               ? {
-                  ...dictation.display,
+                  settled: '',
+                  deciding: '',
                   onPress: editDictation,
                   tidying: tidying && dictation.phase === 'idle',
+                  line: (
+                    <ListeningLine meter={heard} tidying={tidying && dictation.phase === 'idle'} />
+                  ),
                 }
               : morphing
                 ? { settled: '', deciding: '', morph, onPress: () => setMorph(null) }
@@ -1215,6 +1216,8 @@ export function ComposerField({
     tidying?: boolean;
     /** The better words arriving: only the changed ones swap (`LiveWords`). */
     morph?: WordMorph | null;
+    /** In place of the words: the listening line (`ListeningLine`). */
+    line?: ReactNode;
   };
   /**
    * The mic is held (a voice message): the field keeps the shape it had when
@@ -1366,24 +1369,28 @@ export function ComposerField({
                 accessibilityHint="Double-tap to stop and edit"
                 accessibilityLiveRegion="polite"
               >
-                <Text maxFontSizeMultiplier={chromeScale} style={[field.input, field.cardInput]}>
-                  {empty ? (
-                    <>
-                      <Caret />
-                      <Text style={{ color: colors.textMuted }}>{placeholder}</Text>
-                    </>
-                  ) : (
-                    <>
-                      <LiveWords
-                        settled={dictation.settled}
-                        deciding={dictation.deciding}
-                        tidying={dictation.tidying}
-                        morph={dictation.morph}
-                      />
-                      {!dictation.tidying && !dictation.morph && <Caret />}
-                    </>
-                  )}
-                </Text>
+                {dictation.line ? (
+                  dictation.line
+                ) : (
+                  <Text maxFontSizeMultiplier={chromeScale} style={[field.input, field.cardInput]}>
+                    {empty ? (
+                      <>
+                        <Caret />
+                        <Text style={{ color: colors.textMuted }}>{placeholder}</Text>
+                      </>
+                    ) : (
+                      <>
+                        <LiveWords
+                          settled={dictation.settled}
+                          deciding={dictation.deciding}
+                          tidying={dictation.tidying}
+                          morph={dictation.morph}
+                        />
+                        {!dictation.tidying && !dictation.morph && <Caret />}
+                      </>
+                    )}
+                  </Text>
+                )}
               </Pressable>
             ) : (
               <View>

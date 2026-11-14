@@ -18,6 +18,7 @@
 //! Nothing here leaves the computer except the names pass, which goes to the
 //! engine the user already runs their agents on.
 
+pub mod ahead;
 pub mod model;
 pub mod pcm;
 pub mod tidy;
@@ -63,7 +64,19 @@ pub async fn improve(
     vocabulary: Vec<String>,
     context: Option<String>,
 ) -> Option<Improved> {
-    if !pcm::worth_transcribing(&samples_16k) {
+    improve_rest(String::new(), samples_16k, vocabulary, context).await
+}
+
+/// [`improve`] for a dictation partly written out already ([`ahead`]):
+/// `said` is those words, `rest` the audio after them.
+pub async fn improve_rest(
+    said: String,
+    rest: Vec<f32>,
+    vocabulary: Vec<String>,
+    context: Option<String>,
+) -> Option<Improved> {
+    let rest_worth = pcm::worth_transcribing(&rest);
+    if !rest_worth && said.trim().is_empty() {
         return None;
     }
     let path = model::ready_path()?;
@@ -76,13 +89,17 @@ pub async fn improve(
     let fixes = yours.fix_lines();
     let names = vocabulary.clone();
     let started = std::time::Instant::now();
-    let raw =
-        tokio::task::spawn_blocking(move || transcribe::transcribe(&path, &samples_16k, &names))
+    let rest_said = if rest_worth {
+        tokio::task::spawn_blocking(move || transcribe::transcribe(&path, &rest, &names))
             .await
             .ok()?
             .map_err(|error| tracing::warn!(%error, "[Dictation] Whisper failed"))
-            .ok()?;
+            .ok()?
+    } else {
+        String::new()
+    };
     let heard_ms = started.elapsed().as_millis();
+    let raw = ahead::join(&[said, rest_said]);
     if raw.trim().is_empty() {
         return None;
     }
