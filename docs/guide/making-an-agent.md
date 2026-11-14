@@ -91,15 +91,15 @@ An agent works on one thing at a time. Messages sent while it's busy wait their 
 ## Dictation
 
 Click the microphone in the message box (or press ⌘⇧D, or hold ⌥Space) and talk. No words show
-while you talk: under the box your voice moves as a wave, beside **Listening** and how long it's been.
-If the mic hears nothing for three seconds, the line says **Can't hear you · check the mic** and names
+while you talk: the box becomes one row, with how long it's been and your voice moving as a wave
+where the words would be. If the mic hears nothing for three seconds, the row says **Can't hear you · check the mic** and names
 the microphone it's using, so you never talk for minutes into a dead mic; if it hears sound but no
 words for ten seconds (a muted or wrong input), it says that instead. **Enter** (or Send) stops and
 sends; **Esc** cancels. The phone works the same way.
 
 When you stop, your computer writes what you said out with Whisper, a speech model that runs on your
 computer, primed with your agents' and projects' names. Then a quick pass by Claude (Haiku, with no
-tools) fixes only misheard names and punctuation, using the conversation you're in. It says
+tools) fixes only misheard names and punctuation, using the conversation you're in. The row says
 **Tidying…** for a few seconds, then the words appear in the box. Long dictations are written out as
 you go, a piece at a time, so stopping after five minutes only waits for the last bit. Send while it's
 still listening or tidying, on the Mac or the phone, and the message moves up into the chat at once,

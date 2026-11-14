@@ -5883,7 +5883,7 @@
       "layer": "semantic",
       "owner": "global/semantic",
       "status": "canonical",
-      "consumerCount": 9
+      "consumerCount": 10
     },
     {
       "name": "--font-size-subhead",
@@ -6291,7 +6291,7 @@
       "layer": "semantic",
       "owner": "global/semantic",
       "status": "canonical",
-      "consumerCount": 804
+      "consumerCount": 806
     },
     {
       "name": "--spacing-sm",
