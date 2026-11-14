@@ -141,9 +141,12 @@ describe('outbox', () => {
   });
 
   it('sends a message held while tidying when the app went, never left saying Tidying…', () => {
-    const restored = restorePending({ a: [pend('held', 1, { tidying: true })] });
+    const restored = restorePending({ a: [pend('held', now - 5000, { tidying: true })] }, now);
     expect(restored.a[0].tidying).toBeUndefined();
     expect(restored.a[0].waiting).toBe(true);
+    // Stuck for long (an older build): cleared, never sent out of the blue.
+    const stale = pend('stuck', now - OUTBOX_WAIT_MS - 1, { tidying: true });
+    expect(restorePending({ a: [stale] }, now).a).toEqual([]);
   });
 });
 
